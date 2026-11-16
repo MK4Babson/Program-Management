@@ -9,15 +9,18 @@ import os
 SEED = int(os.environ.get("MPCT_SEED", 42))  # change the seed for a hold-out test
 
 # Billing periods (monthly pay applications)
-PERIODS = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]
+PERIODS = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08"]
 
-# Four fictional buildings across two fictional West Texas campuses.
-# scale = size of each building's scope relative to the base rate card.
+# Six fictional buildings across three fictional West Texas campuses, starting at different
+# times so the portfolio shows projects at different stages.
+# scale = size of scope vs the base rate card; start = index of the first billing month.
 PROJECTS = [
-    {"project_id": "WTX-A1", "campus": "Mesa Campus (fictional)",  "scale": 1.00},
-    {"project_id": "WTX-A2", "campus": "Mesa Campus (fictional)",  "scale": 0.85},
-    {"project_id": "WTX-B1", "campus": "Ridge Campus (fictional)", "scale": 1.15},
-    {"project_id": "WTX-B2", "campus": "Ridge Campus (fictional)", "scale": 0.90},
+    {"project_id": "WTX-A1", "campus": "Mesa Campus (fictional)",   "scale": 1.00, "start": 0},
+    {"project_id": "WTX-A2", "campus": "Mesa Campus (fictional)",   "scale": 0.85, "start": 0},
+    {"project_id": "WTX-B1", "campus": "Ridge Campus (fictional)",  "scale": 1.15, "start": 1},
+    {"project_id": "WTX-B2", "campus": "Ridge Campus (fictional)",  "scale": 0.90, "start": 2},
+    {"project_id": "WTX-C1", "campus": "Plains Campus (fictional)", "scale": 1.05, "start": 3},
+    {"project_id": "WTX-C2", "campus": "Plains Campus (fictional)", "scale": 0.80, "start": 4},
 ]
 
 # Three prime contractors under a multi-prime delivery model (fictional).

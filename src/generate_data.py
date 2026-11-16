@@ -29,15 +29,15 @@ rng = np.random.default_rng(SEED)
 
 # Error-planting probabilities
 P = {
-    "RATE_OVER_CONTRACT": 0.035,     # per unit-price SOV line
-    "QTY_OVER_RECEIPT": 0.045,       # per unit-price SOV line
-    "PCT_COMPLETE_OVERBILL": 0.25,   # per LS line being billed
-    "EXTENSION_ERROR": 0.02,        # per work line (qty x rate != amount)
-    "UNAPPROVED_CO": 0.12,           # per invoice
-    "TM_OVER_APPROVED": 0.12,        # per T&M line
-    "PER_DIEM_OVER_POLICY": 0.15,    # per per-diem line
-    "RETAINAGE_ERROR": 0.10,         # per invoice
-    "DUPLICATE_INVOICE": 0.07,       # per invoice
+    "RATE_OVER_CONTRACT": 0.02,      # per unit-price SOV line
+    "QTY_OVER_RECEIPT": 0.03,        # per unit-price SOV line
+    "PCT_COMPLETE_OVERBILL": 0.12,   # per LS line being billed
+    "EXTENSION_ERROR": 0.008,        # per work line (qty x rate != amount)
+    "UNAPPROVED_CO": 0.06,           # per invoice
+    "TM_OVER_APPROVED": 0.06,        # per T&M line
+    "PER_DIEM_OVER_POLICY": 0.07,    # per per-diem line
+    "RETAINAGE_ERROR": 0.04,         # per invoice
+    "DUPLICATE_INVOICE": 0.025,      # per invoice
 }
 
 
@@ -85,17 +85,21 @@ def main():
                             "contract_type": "Unit price + lump sum", "retainage_rate": RETAINAGE_RATE})
 
             # ---- Contract SOV lines ----
+            # Each prime prices each building a little differently (that's what benchmarking finds)
+            ps = proj.get("start", 0)
+            price_factor = float(rng.uniform(0.96, 1.10))
             sov = []
             for code, desc, unit, base_qty, rate, start, dur in RATE_CARDS[prm]:
                 if unit == "LS":
                     qty = 1
-                    sv = round(rate * proj["scale"], 2)
+                    sv = round(rate * proj["scale"] * price_factor, 2)
                     unit_rate = sv
                 else:
                     qty = round(base_qty * proj["scale"], qty_decimals(unit))
-                    unit_rate = rate
+                    unit_rate = round(rate * price_factor * float(rng.uniform(0.98, 1.03)), 2)
+                # stretch the schedule so buildings are mid-construction at the end of the demo window
                 sov.append(dict(item_code=code, description=desc, unit=unit, qty=qty,
-                                unit_rate=unit_rate, start=start, dur=dur))
+                                unit_rate=unit_rate, start=round(start * 1.5), dur=round(dur * 1.7)))
                 po_line_rows.append({"po_id": po_id, "item_code": code, "line_source": "CONTRACT",
                                      "co_id": None, "description": desc, "unit": unit,
                                      "contract_qty": qty, "contract_unit_rate": unit_rate,
@@ -107,7 +111,7 @@ def main():
             for k in range(n_cos):
                 base = sov[rng.integers(0, len([s for s in sov if s["unit"] != "LS"]))]
                 status = rng.choice(["APPROVED", "PENDING", "REJECTED"], p=[0.6, 0.25, 0.15])
-                eff = int(rng.integers(1, 5))  # effective month index
+                eff = min(len(PERIODS) - 1, ps + int(rng.integers(1, 5)))  # effective month index
                 co_id = f"CO-{pid}-{prm[-1]}-{k+1:02d}"
                 co_qty = round(base["qty"] * rng.uniform(0.04, 0.12), qty_decimals(base["unit"]))
                 if base["unit"] == "EA":
@@ -130,6 +134,9 @@ def main():
 
             # ---- Monthly billing ----
             for m, period in enumerate(PERIODS):
+                if m < ps:
+                    continue  # this building hasn't started yet
+                lm = m - ps   # month number within this project
                 inv_seq += 1
                 invoice_id = f"INV-{inv_seq}"
                 invoice_number = f"{prm[-1]}{pid[-2:]}-{m+1:03d}"
@@ -139,8 +146,8 @@ def main():
 
                 # SOV lines
                 for s in sov:
-                    c_now = s_curve(m, s["start"], s["dur"])
-                    c_prev = s_curve(m - 1, s["start"], s["dur"]) if m > 0 else 0.0
+                    c_now = s_curve(lm, s["start"], s["dur"])
+                    c_prev = s_curve(lm - 1, s["start"], s["dur"]) if lm > 0 else 0.0
                     if c_now - c_prev <= 1e-9:
                         continue
                     grn_id = f"GRN-{pid}-{prm[-1]}-{s['item_code']}-{period}"
@@ -238,7 +245,7 @@ def main():
                                       _err=err, _over=over))
 
                 # Per diem line
-                ramp = 0.5 + 0.5 * s_curve(m, 0, 4)
+                ramp = 0.5 + 0.5 * s_curve(lm, 0, 4)
                 workers = int(BASE_HEADCOUNT[prm] * proj["scale"] * ramp * rng.uniform(0.9, 1.1))
                 wd = workers * WORKDAYS_PER_MONTH
                 pd_rate = float(rng.choice([PER_DIEM_CAP, 172.00, 165.00, 160.00]))

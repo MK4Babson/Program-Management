@@ -22,10 +22,11 @@ Done by hand, this is slow and inconsistent. This project automates it as rules 
 
 | Component | File | What it does |
 |---|---|---|
-| Synthetic data generator | `src/generate_data.py` | 4 buildings × 3 primes × 6 monthly pay apps, with POs, change orders, T&M pre-approvals, field verifications, and **9 types of deliberately planted billing errors** |
+| Synthetic data generator | `src/generate_data.py` | 6 buildings on 3 campuses × 3 primes, monthly pay apps over 8 months with staggered starts, with POs, change orders, T&M pre-approvals, field verifications, and **9 types of deliberately planted billing errors** |
 | Match + gate engine | `sql/engine.sql`, `src/run_engine.py` | 10 governance rules in standard SQL (DuckDB locally, written to port to BigQuery) → `exceptions`, `invoice_gates`, `prime_scorecard` |
 | Evaluation | `src/evaluate.py` | Precision/recall per rule against the planted ground truth, invoice-level confusion matrix, $ caught, and a tolerance trade-off sweep |
-| Web app | `app.py` | Streamlit app: demo or upload your own CSVs, live tolerance sliders, gates by prime, invoice drill-down, exception downloads, accuracy, stress test |
+| Web app | `app.py` | Streamlit app with project / contractor / month filters: **This week's decisions** (plain-English findings with $ and recommended actions), **Portfolio** (contract vs billed vs verified per building), **Contractors** (scorecard, monthly trend, rate comparison), invoice drill-down, exceptions, accuracy and stress test |
+| Insights engine | `src/insights.py` | Turns exceptions into management information: $ at risk by issue, project hotspots, billing ahead of verified work, pending change-order exposure, contractor trends, same-item price spread |
 | Input checker | `src/validate_input.py` | Catches mapping mistakes (formats, broken links between tables, missing receipts) before the engine runs |
 | Stress test | `src/inject_errors.py` | Tests the engine on **any** data, including real data with no answer key: plants known errors in a copy and reports caught / missed / new false alarms |
 | Templates | `templates/`, `DATA_DICTIONARY.md` | Blank CSVs and column definitions for loading your own data |
@@ -71,28 +72,31 @@ An invoice's gate is its **worst** exception. **Amount at risk** is the overbill
 
 ## Results (synthetic)
 
-**Development dataset (seed 42):** 77 pay applications, $360M billed, 90 planted errors worth $20.7M.
+**Development dataset (seed 42):** 6 buildings × 3 primes, 117 pay applications, $420M billed, 67 planted errors worth $17.5M.
 
 | Metric | Result |
 |---|---|
-| Precision / recall, all rules | 100% / 100% |
-| Clean invoices wrongly stopped | 0 of 24 |
-| Invoices with errors that passed | 0 of 53 |
-| Planted overbilling caught | $20.7M of $20.7M |
+| Precision / recall, all rules | 98.5% / 100% |
+| Clean invoices wrongly stopped | 1 of 67 (sent to REVIEW, not HOLD) |
+| Invoices with errors that passed | 0 of 50 |
+
+The one false alarm is a lump-sum line billed 1.1 points above a verified % complete that itself carries measurement noise.
 
 **Hold-out datasets (tolerances not retuned):**
 
-| Seed | Planted errors | Precision | Recall | Notes |
-|---|---|---|---|---|
-| 7 | 105 | 99.1% | 100% | 1 false alarm on lump-sum % (verification noise) |
-| 2026 | 95 | 100% | 100% | |
-| 99 | 91 | 98.9% | 98.9% | 1 small qty overbill hid inside measurement noise; 1 lump-sum false alarm |
+| Seed | Planted errors | Precision | Recall |
+|---|---|---|---|
+| 7 | 76 | 100% | 100% |
+| 2026 | 55 | 98.2% | 100% |
+| 99 | 72 | 100% | 100% |
+
+**Stress test on clean data** (40 planted errors, 25% deliberately tiny): 82–93% recall with 0 new false alarms, and every miss was one of the tiny errors below tolerance. With no tiny errors: 100%.
 
 **Tolerance trade-off for the quantity check:**
 
 ![Tolerance trade-off](outputs/tolerance_tradeoff.png)
 
-At 0% tolerance the rule flags 109 honest lines (9% precision), because field measurement noise looks like overbilling. Above ~2.5%, real overbills start slipping through. **1.5%** sits in the middle of the safe band. In a live program this threshold would be set from the actual measurement accuracy of each work type.
+At 0% tolerance the rule flags 163 honest lines (8% precision), because field measurement noise looks like overbilling. From 1.25% to 3.25% both precision and recall are 100%; above that, real overbills start slipping through. **1.5%** sits in the safe band. In a live program this threshold would be set from the actual measurement accuracy of each work type.
 
 ## Honest limitations
 
@@ -126,7 +130,7 @@ Outputs land in `outputs/`: `exceptions.csv`, `invoice_gates.csv`, `prime_scorec
 
 | Week | Module |
 |---|---|
-| 1 ✅ | 3-way match + pre-approval engine, evaluation, web app, real-data stress test |
+| 1 ✅ | 3-way match + pre-approval engine, evaluation, web app, real-data stress test, portfolio filters and decision insights |
 | 2 | **Cost intelligence:** $/sq ft benchmark of Texas data center projects from public filings · **Rate benchmarking** with TxDOT bid tabulations and GSA per diem rates |
 | 2–3 | **Governance dashboard:** BigQuery + Looker Studio (gates by prime, cycle time, $ held, top exception types) |
 | 3 | **AI invoice reader:** an LLM extracts line items from PDF pay applications and drafts exception memos; extraction accuracy measured against ground truth |

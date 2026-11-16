@@ -1,5 +1,7 @@
-project_id,campus,scale
-WTX-A1,Mesa Campus (fictional),1.0
-WTX-A2,Mesa Campus (fictional),0.85
-WTX-B1,Ridge Campus (fictional),1.15
-WTX-B2,Ridge Campus (fictional),0.9
+project_id,campus,scale,start
+WTX-A1,Mesa Campus (fictional),1.0,0
+WTX-A2,Mesa Campus (fictional),0.85,0
+WTX-B1,Ridge Campus (fictional),1.15,1
+WTX-B2,Ridge Campus (fictional),0.9,2
+WTX-C1,Plains Campus (fictional),1.05,3
+WTX-C2,Plains Campus (fictional),0.8,4

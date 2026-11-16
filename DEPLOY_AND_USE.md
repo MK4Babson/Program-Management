@@ -33,8 +33,8 @@ You'll know it worked when your prompt starts with `(.venv)`.
 python src/generate_data.py                                # creates data/raw (with planted errors)
 python src/generate_data.py --clean --out data/clean_demo  # creates a clean dataset
 python src/validate_input.py --data data/raw               # expect: OK
-python src/run_engine.py                                   # expect: HOLD 51, PASS 24, REVIEW 2
-python src/evaluate.py                                     # expect: ALL RULES 100% / 100%
+python src/run_engine.py                                   # expect: PASS 66, HOLD 48, REVIEW 3
+python src/evaluate.py                                     # expect: ALL RULES 98.5% precision / 100% recall
 ```
 
 ### A5. Open the web app locally
@@ -94,22 +94,23 @@ The first push opens a browser window to sign in to GitHub. Approve it.
 | Area | What to do | What it tells you |
 |---|---|---|
 | **1. Data** (sidebar) | Pick a demo or upload your CSVs | What gets checked |
-| **2. Tolerances** (sidebar) | Move sliders | How strict each gate is. Results update instantly |
-| **KPI row** | Read | Invoices, $ billed, first-pass rate, # on hold, $ at risk |
-| **Gates by prime** | Read the bar + scorecard | Which contractor causes the most holds, and the top exception type |
-| **Invoice drill-down** | Pick an invoice | Its lines + every exception with the reason (e.g. "Billed 4,643 LF vs verified 4,597 LF") |
+| **2. Filters** (sidebar) | Pick projects, contractors and a month range | Every number and finding on the page follows these filters |
+| **3. Tolerances** (sidebar, folded) | Open it and move the sliders | How strict each check is. Results update instantly |
+| **KPI row** | Read | Projects in view, $ billed, first-pass rate, invoices on hold, $ at risk, pending change orders |
+| **This week's decisions** | Read top to bottom; download the brief | The most important findings in plain English, each with a $ amount and a recommended action |
+| **Portfolio** | Read the cards and chart | Each building: contract value, % billed, % verified complete, $ at risk, status (On track / Watch / Act now) |
+| **Contractors** | Read the scorecard, trend and tables | Who bills cleanly, who is getting worse, where each contractor's risk comes from, and the same item priced differently across buildings |
+| **Invoices** | Pick an invoice | Its lines and every exception with the reason |
 | **Exceptions** | Filter by rule, download CSV | The work queue for the commercial team |
-| **Accuracy** | Read (demo data has an answer key) | Precision / recall per rule at the current tolerances |
-| **Stress test** | Choose # of errors → Run | Plants errors in a copy and reports caught / missed / new false alarms |
+| **Accuracy & testing** | Read; run the stress test | Precision/recall against the answer key; plant errors in a copy and measure what is caught |
 
 ### A 3-minute interview demo script
-1. *"Here are 77 pay apps from three primes across four buildings: $360M billed, 51 on hold, $20.7M at risk."*
-2. Gates tab: *"The mechanical prime is 13% of billed value at risk, mostly quantities billed above field-verified."*
-3. Drill into one HOLD invoice and read the reason out loud.
-4. Drag **Qty REVIEW** to 0%, open Accuracy and show precision collapsing: *"Field measurement has about 1% noise. A zero tolerance would bury the team in false alarms. I chose 1.5% from the data."*
-5. Switch to the clean data and run the stress test: *"On data with no answer key, I plant known errors and measure what the engine catches."*
-
----
+1. *"This is a six-building program with three prime contractors: $420M billed, 48 invoices on hold, $17.5M at risk."*
+2. **This week's decisions:** read the top three findings and their actions out loud.
+3. Filter to one building, and show how the findings change to that building's issues.
+4. **Portfolio:** *"This building has billed more than the field has verified. That's the gap I'd withhold."*
+5. **Contractors:** *"This contractor's first-pass rate dropped from 76% to 42% in the last two months, so I'd call a billing-quality meeting."*
+6. **Accuracy & testing:** *"On data with no answer key, I plant known errors and measure what the engine catches."*
 
 ## Part D: Test it with real data
 
@@ -117,7 +118,7 @@ Contractor invoices are confidential, so there's no public dataset of "real invo
 
 ### Level 1: Practice on the clean demo (5 minutes)
 App → **Demo: clean invoices** → **Stress test** → Run (40 errors, 25% tiny).
-**What "working" looks like:** 0 pre-existing exceptions, about 90–95% recall, every miss marked `subtle = True`, and 0 new false alarms.
+**What "working" looks like:** 0 pre-existing exceptions, about 80–95% recall, every miss marked `subtle = True`, and 0 new false alarms.
 Command-line version:
 ```powershell
 python src/inject_errors.py --data data/clean_demo --n 40 --subtle 0.25
