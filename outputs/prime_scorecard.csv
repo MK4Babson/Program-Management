@@ -1,0 +1,4 @@
+prime_id,prime_name,invoices,billed_gross,pass_n,review_n,hold_n,amount_at_risk,first_pass_rate_pct,risk_pct_of_billed,top_exception
+PRM-C,Brazos Plains Civil Works (fictional),25,180167006.09,8,2,15,2013382.74,32.0,1.12,PCT_COMPLETE_OVERBILL
+PRM-E,Lone Mesa Electrical Constructors (fictional),26,79029561.4,8,0,18,5098188.84,30.8,6.45,TM_OVER_APPROVED
+PRM-M,Red Draw Mechanical Services (fictional),26,101085755.71,8,0,18,13618476.870000001,30.8,13.47,QTY_OVER_RECEIPT
