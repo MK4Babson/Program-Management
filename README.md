@@ -31,6 +31,40 @@ Done by hand, this is slow and inconsistent. This project automates it as rules 
 | Stress test | `src/inject_errors.py` | Tests the engine on **any** data, including real data with no answer key: plants known errors in a copy and reports caught / missed / new false alarms |
 | Templates | `templates/`, `DATA_DICTIONARY.md` | Blank CSVs and column definitions for loading your own data |
 
+## Interface
+
+Four pages, in a dark "orbital" theme:
+
+| Page | What it shows |
+|---|---|
+| **Mission Control** | A 3D Earth (NASA Blue Marble imagery) with a pin at each project's coordinates, colored by health; an automatic camera tour; one card per program with a pixel animation of the structure assembling to its verified % complete |
+| **Insights** | One card per project: health score (0-100) with cost, schedule, billing and cash sub-scores, key numbers and flags |
+| **Project** | Deep dive for one project: live build animation, location close-up, 12 KPIs, progress vs plan with a forecast to completion, cost bridge, bills by gate, money at risk by issue, rates vs program median, live insights and evidence |
+| **Program analytics** | All manager views (decisions, root causes, contractors, schedule and penalties, cash flow, policy simulator) and the evidence tabs |
+
+The health score formula is in `src/health.py` and is explained on the Insights page.
+Globe library and Earth textures load from a version-pinned public CDN (globe.gl 2.46.2, three-globe 2.45.6).
+Project coordinates are in `projects.csv` (`latitude`, `longitude`, `location`, `structure`).
+The West Texas campuses are fictional, so their locations are illustrative.
+
+## Manager views (program-manager layer)
+
+The engine checks every bill like a clerk would; the manager views turn those checks into decisions:
+
+| View | Question it answers |
+|---|---|
+| Manager overview | Budget vs forecast at completion, % verified vs planned, status and *why* per project |
+| This week's decisions | Ranked actions across cost, schedule, cash and billing, each with $ impact and an owner |
+| Root causes | Why bills fail, who owns the fix, and the first-pass rate if each cause is fixed |
+| Contractors | Score (first-pass, accuracy, schedule), trend, repeat issues, rate benchmarking vs program median |
+| Schedule & penalties | Planned vs forecast finish, schedule index, delay-penalty (LD) exposure |
+| Cash flow | Paid, unpaid, overdue, retention held, advance recovery, next month's cash need, flagged money already paid |
+| Policy simulator | Strict vs current vs loose checking: workload, money blocked, errors caught, overbilling missed |
+
+These use three optional files (`project_controls`, `baseline_plan`, `payments`; see DATA_DICTIONARY.md).
+Two demos include them: the synthetic West Texas data center program and the North Koel canal program
+(4 contracts built from real WAPCOS tender documents, amounts converted at Rs 95 = $1).
+
 ## Data model
 
 ```

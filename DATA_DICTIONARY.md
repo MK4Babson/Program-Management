@@ -107,3 +107,46 @@ One CSV per table. Blank templates are in `templates/`. Run `python src/validate
 | Column | Type | Required | Meaning |
 |---|---|---|---|
 | `project_id` | str | yes | Project id |
+
+## Optional program-control files (unlock the manager views)
+
+Without these the dashboard still checks every bill. With them it also shows budget, forecast, schedule, delay penalties and cash.
+
+### project_controls.csv
+
+| column | type | meaning |
+|---|---|---|
+| project_id | str | Project id (matches invoices.project_id) |
+| short_name | str | Readable name shown on screens, e.g. Amba |
+| approved_budget | float | Owner's approved budget for this contract, including contingency ($) |
+| planned_start | date | Baseline start date YYYY-MM-DD |
+| planned_finish | date | Baseline (contract) completion date |
+| forecast_finish | date | Current forecast completion (leave blank to let the dashboard estimate it) |
+| data_date | date | Date the data is current to |
+| ld_rate_pct_per_week | float | Delay penalty (liquidated damages) per week of delay, % of contract value |
+| ld_cap_pct | float | Maximum delay penalty, % of contract value |
+| advance_paid | float | Mobilization / advance payment made to the contractor ($, 0 if none) |
+| advance_recovery_start_pct | float | Recovery of the advance starts at this % of progress |
+| advance_recovery_end_pct | float | Advance must be fully recovered by this % of progress |
+| payment_terms_days | float | Days from invoice to payment allowed by the contract |
+
+### baseline_plan.csv
+
+| column | type | meaning |
+|---|---|---|
+| project_id | str | Project id |
+| period | str | YYYY-MM |
+| planned_pct_cum | float | Planned cumulative % complete at the end of this month (0-100) |
+
+### payments.csv
+
+| column | type | meaning |
+|---|---|---|
+| invoice_id | str | Invoice id |
+| submitted_date | date | Date the invoice was received |
+| certified_date | date | Date it was certified (optional) |
+| paid_date | date | Date paid (blank if not paid yet) |
+| amount_paid | float | Amount paid ($) |
+| advance_recovered | float | Advance recovered from this invoice ($) |
+| amount_withheld | float | Amount withheld from this invoice for disputed items ($) |
+| status | str | Free text, e.g. Paid, Under scrutiny |
