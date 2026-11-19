@@ -18,6 +18,8 @@ Realism choices:
 ALL DATA IS SYNTHETIC.
 """
 from pathlib import Path
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -26,6 +28,7 @@ from config import (SEED, PERIODS, PROJECTS, PRIMES, RATE_CARDS, TM_RATES, BASE_
 
 RAW = Path(__file__).resolve().parents[1] / "data" / "raw"
 rng = np.random.default_rng(SEED)
+rrng = np.random.default_rng(SEED + 7919)  # separate stream for risk drivers
 
 # Error-planting probabilities
 P = {
@@ -37,8 +40,20 @@ P = {
     "TM_OVER_APPROVED": 0.06,        # per T&M line
     "PER_DIEM_OVER_POLICY": 0.07,    # per per-diem line
     "RETAINAGE_ERROR": 0.04,         # per invoice
-    "DUPLICATE_INVOICE": 0.025,      # per invoice
+    "DUPLICATE_INVOICE": 0.009,      # per invoice: rare (about one per program), as in practice
 }
+
+
+DUP_TARGET = ("WTX-A2", "PRM-E", "2026-05")
+
+# ---- Risk drivers (assumptions about how billing errors behave; used by the ML risk model) ----
+# Error probabilities are scaled per bill by observable-in-principle conditions, on a separate random stream:
+#   contractor billing habit (most crews careful, a few habitual), first two bills of a contract (set-up errors),
+#   steep progress months (rushed bills), close-out pressure (>75% billed), a pending change order on the PO,
+#   and an error on the previous bill (habits persist). Set MPCT_RISK_DRIVERS=0 to plant errors uniformly.
+RISK_DRIVERS = os.environ.get("MPCT_RISK_DRIVERS", "1") == "1"
+HABIT_LEVELS, HABIT_P = [0.5, 0.8, 1.0, 1.4, 2.4], [0.20, 0.30, 0.25, 0.15, 0.10]
+RISK_NORMALIZER = 2.2  # keeps the overall error rate close to the base probabilities  # project, prime, period of the planted resubmission
 
 
 def qty_decimals(unit):
@@ -133,6 +148,9 @@ def main():
                                          "scheduled_value": co["co_amount"]})
 
             # ---- Monthly billing ----
+            habit = float(rrng.choice(HABIT_LEVELS, p=HABIT_P))
+            prev_err = False
+            tot_value = sum(s_["qty"] * s_["unit_rate"] for s_ in sov) or 1.0
             for m, period in enumerate(PERIODS):
                 if m < ps:
                     continue  # this building hasn't started yet
@@ -143,6 +161,16 @@ def main():
                 inv_date = pd.Timestamp(period + "-25") + pd.Timedelta(days=int(rng.integers(0, 6)))
                 lines = []
                 gt_inv = []  # (line_no or None, error_type, overbilled_amount)
+                if RISK_DRIVERS:
+                    inc = sum((s_curve(lm, s_["start"], s_["dur"]) - (s_curve(lm - 1, s_["start"], s_["dur"]) if lm > 0 else 0.0))
+                              * s_["qty"] * s_["unit_rate"] for s_ in sov) / tot_value
+                    cum = sum(s_curve(lm, s_["start"], s_["dur"]) * s_["qty"] * s_["unit_rate"] for s_ in sov) / tot_value
+                    pending = any(c_["status"] == "PENDING" and c_["eff_idx"] <= m for c_ in cos)
+                    R = (habit * (1.5 if lm < 2 else 1.0) * (1.3 if inc > 0.06 else 1.0) * (1.3 if cum > 0.75 else 1.0)
+                         * (1.5 if pending else 1.0) * (1.35 if prev_err else 1.0)) / RISK_NORMALIZER
+                else:
+                    R = 1.0
+                pr = lambda k: min(0.85, P[k] * R)  # noqa: E731
 
                 # SOV lines
                 for s in sov:
@@ -160,7 +188,7 @@ def main():
                                          "verified_pct_complete_cum": ver_cum})
                         billed_cum = true_cum
                         err = None
-                        if rng.random() < P["PCT_COMPLETE_OVERBILL"] and true_cum < 95:
+                        if rng.random() < pr("PCT_COMPLETE_OVERBILL") and true_cum < 95:
                             billed_cum = round(min(100.0, true_cum + rng.uniform(1.5, 20)), 1)
                             err = "PCT_COMPLETE_OVERBILL"
                         amount = round(s["unit_rate"] * (billed_cum - prev_cum) / 100, 2)
@@ -184,10 +212,10 @@ def main():
                                          "verified_pct_complete_cum": None})
                         qty, rate, err, over = true_period, s["unit_rate"], None, 0.0
                         r = rng.random()
-                        if r < P["RATE_OVER_CONTRACT"]:
+                        if r < pr("RATE_OVER_CONTRACT"):
                             rate = round(s["unit_rate"] * rng.uniform(1.02, 1.15), 2)
                             err, over = "RATE_OVER_CONTRACT", round((rate - s["unit_rate"]) * qty, 2)
-                        elif r < P["RATE_OVER_CONTRACT"] + P["QTY_OVER_RECEIPT"]:
+                        elif r < pr("RATE_OVER_CONTRACT") + pr("QTY_OVER_RECEIPT"):
                             f = rng.uniform(1.015, 1.20)
                             qty = round(true_period * f, d)
                             if s["unit"] == "EA" and qty <= true_period:
@@ -211,7 +239,7 @@ def main():
                                           pct_complete_cum=None, grn_id=None, _err=None, _over=0.0))
 
                 # Planted: billing a change order that is not approved
-                if rng.random() < P["UNAPPROVED_CO"]:
+                if rng.random() < pr("UNAPPROVED_CO"):
                     bad = [c for c in cos if c["status"] != "APPROVED"]
                     if bad:
                         c = bad[int(rng.integers(0, len(bad)))]
@@ -236,7 +264,7 @@ def main():
                                     "approved_hours": approved, "approved_rate": tm_rate})
                     hours = int(approved * rng.uniform(0.6, 1.0))
                     err, over = None, 0.0
-                    if rng.random() < P["TM_OVER_APPROVED"]:
+                    if rng.random() < pr("TM_OVER_APPROVED"):
                         hours = int(np.ceil(approved * rng.uniform(1.05, 1.40)))
                         err, over = "TM_OVER_APPROVED", round((hours - approved) * tm_rate, 2)
                     lines.append(dict(line_type="TM", ref_id=appr_id, description=f"T&M - {craft}", unit="HR",
@@ -250,7 +278,7 @@ def main():
                 wd = workers * WORKDAYS_PER_MONTH
                 pd_rate = float(rng.choice([PER_DIEM_CAP, 172.00, 165.00, 160.00]))
                 err, over = None, 0.0
-                if rng.random() < P["PER_DIEM_OVER_POLICY"]:
+                if rng.random() < pr("PER_DIEM_OVER_POLICY"):
                     pd_rate = round(PER_DIEM_CAP * rng.uniform(1.05, 1.35), 2)
                     err, over = "PER_DIEM_OVER_POLICY", round((pd_rate - PER_DIEM_CAP) * wd, 2)
                 lines.append(dict(line_type="PER_DIEM", ref_id="PER-DIEM", description=f"Per diem - {workers} workers",
@@ -260,7 +288,7 @@ def main():
 
                 # Planted arithmetic error on one random work line (qty x rate != amount)
                 for ln in lines:
-                    if ln["_err"] is None and ln["qty"] is not None and rng.random() < P["EXTENSION_ERROR"]:
+                    if ln["_err"] is None and ln["qty"] is not None and rng.random() < pr("EXTENSION_ERROR"):
                         bump = round(float(rng.uniform(500, 25000)), 2)
                         ln["amount"] = round(ln["amount"] + bump, 2)
                         ln["_err"], ln["_over"] = "EXTENSION_ERROR", bump
@@ -275,7 +303,7 @@ def main():
                 gross = round(sum(l["amount"] for l in lines), 2)
                 ret_base = round(sum(l["amount"] for l in lines if l["line_type"] in ("SOV", "CO")), 2)
                 retainage = round(ret_base * RETAINAGE_RATE, 2)
-                if rng.random() < P["RETAINAGE_ERROR"]:
+                if rng.random() < pr("RETAINAGE_ERROR"):
                     wrong = round(ret_base * 0.05, 2) if rng.random() < 0.6 else round(gross * RETAINAGE_RATE * 0.5, 2)
                     gt_inv.append((None, "RETAINAGE_ERROR", round(retainage - wrong, 2)))
                     retainage = wrong
@@ -286,16 +314,19 @@ def main():
                 inv_rows.append(header)
                 for ln in lines:
                     line_rows.append({"invoice_id": invoice_id, **{k: v for k, v in ln.items() if not k.startswith("_")}})
+                prev_err = len(gt_inv) > 0
                 for ln_no, et, over in gt_inv:
                     gt_rows.append({"invoice_id": invoice_id, "line_no": ln_no, "error_type": et,
                                     "overbilled_amount": over})
 
                 # Planted: duplicate submission of the same pay application
-                if rng.random() < P["DUPLICATE_INVOICE"]:
+                # one realistic resubmission is always planted: a copy with a "-R" number, sent ~12 days later
+                forced = P["DUPLICATE_INVOICE"] > 0 and (pid, prm, period) == DUP_TARGET
+                if rng.random() < P["DUPLICATE_INVOICE"] or forced:
                     inv_seq += 1
                     dup_id = f"INV-{inv_seq}"
                     dup = dict(header, invoice_id=dup_id,
-                               invoice_number=invoice_number + rng.choice(["-R", "A", "-1", ""]) if rng.random() < 0.8 else f"{prm[-1]}{pid[-2:]}-{m+51:03d}",
+                               invoice_number=(invoice_number + "-R") if forced else (invoice_number + rng.choice(["-R", "A", "-1", ""]) if rng.random() < 0.8 else f"{prm[-1]}{pid[-2:]}-{m+51:03d}"),
                                invoice_date=(inv_date + pd.Timedelta(days=int(rng.integers(3, 21)))).date().isoformat())
                     inv_rows.append(dup)
                     for ln in lines:

@@ -28,7 +28,8 @@ html, body, .stApp, .stMarkdown, .stText, p, label, button, input, textarea, h1,
     #05070d;
 }
 [data-testid="stHeader"] { background: rgba(5,7,13,0.72); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
-[data-testid="stToolbar"], footer, [data-testid="stDecoration"] { display: none !important; }
+[data-testid="stToolbarActions"], [data-testid="stAppDeployButton"], [data-testid="stMainMenu"], [data-testid="stStatusWidget"],
+footer, [data-testid="stDecoration"] { display: none !important; }
 [data-testid="stSidebar"] { background: rgba(9,13,24,0.92); border-right: 1px solid var(--line); }
 h1, h2, h3, h4 { letter-spacing: -0.01em; color: var(--ink); }
 .block-container { padding-top: 3.6rem; max-width: 1400px; }
@@ -47,6 +48,15 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; color: var(--ink); }
   border-radius: 10px; transition: all .15s ease; }
 .stButton > button:hover { border-color: var(--accent); background: rgba(79,209,255,0.18); color: #fff; }
 [data-testid="stDataFrame"] { border: 1px solid var(--line); border-radius: 10px; }
+/* control panel toggle: always visible, accent styled */
+[data-testid="stExpandSidebarButton"], [data-testid="stSidebarCollapsedControl"] button, [data-testid="stSidebarCollapseButton"] button {
+  background: rgba(79,209,255,0.12) !important; border: 1px solid rgba(79,209,255,0.5) !important; border-radius: 8px !important; color: #4fd1ff !important; }
+[data-testid="stSidebarCollapseButton"] { visibility: visible !important; opacity: 1 !important; }
+.stButton > button[kind="tertiary"] { border: none; background: transparent; color: var(--accent); padding: 0; }
+.stButton > button[kind="tertiary"]:hover { color: #fff; text-decoration: underline; background: transparent; }
+.howto { font-size: .86rem; color: var(--ink2); background: rgba(14,21,37,.55); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: 8px 12px; margin: 4px 0 14px; line-height: 1.45; }
+.stat { cursor: help; }
 /* custom blocks */
 .eyebrow { font-family:'JetBrains Mono',monospace; color: var(--accent); font-size: .72rem; letter-spacing: .22em; text-transform: uppercase; }
 .hero-title { font-size: 2.5rem; font-weight: 700; line-height: 1.05; margin: .2rem 0 .3rem; color: var(--ink); }

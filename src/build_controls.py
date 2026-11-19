@@ -23,6 +23,9 @@ CONTINGENCY = {"WTX-A1": 0.06, "WTX-A2": 0.05, "WTX-B1": -0.01, "WTX-B2": 0.04, 
 SHORT = {"WTX-A1": "Mesa A1", "WTX-A2": "Mesa A2", "WTX-B1": "Ridge B1", "WTX-B2": "Ridge B2",
          "WTX-C1": "Plains C1", "WTX-C2": "Plains C2"}
 DATA_DATE = "2026-08-31"
+# fictional campuses: illustrative West Texas coordinates
+COORDS = {"WTX-A1": (32.3810, -100.8620), "WTX-A2": (32.3858, -100.8551), "WTX-B1": (33.1210, -101.5790),
+          "WTX-B2": (33.1262, -101.5718), "WTX-C1": (34.4205, -101.8010), "WTX-C2": (34.4251, -101.7932)}
 
 
 def main():
@@ -97,6 +100,11 @@ def main():
     pd.DataFrame(rows).to_csv(data / "payments.csv", index=False)
     pr = raw["projects"].copy()
     pr["short_name"] = pr.project_id.map(SHORT)
+    pr["latitude"] = pr.project_id.map(lambda x: COORDS.get(x, (None, None))[0])
+    pr["longitude"] = pr.project_id.map(lambda x: COORDS.get(x, (None, None))[1])
+    pr["location"] = pr.campus.str.replace(" (fictional)", "", regex=False) + ", West Texas, USA (illustrative location)"
+    pr["structure"] = "datacenter"
+    pr["project_name"] = "Hyperscale data center building " + pr.project_id.str[-2:]
     pr.to_csv(data / "projects.csv", index=False)
     print(f"wrote project_controls, baseline_plan, payments to {data}")
 

@@ -196,8 +196,8 @@ def _months_between(a, b):
     return (pd.Period(b, "M") - pd.Period(a, "M")).n
 
 
-def _forecast_finish(prog_p, end_period, data_date):
-    """Estimate completion from the recent pace of verified progress (last 3 months with progress)."""
+def _pace_finish(prog_p, end_period, data_date):
+    """Fallback: completion from the recent pace of verified progress (last 3 months with progress)."""
     s = prog_p[(prog_p.period <= end_period) & prog_p.verified_pct.notna()].sort_values("period")
     if len(s) < 2:
         return pd.NaT
@@ -211,6 +211,35 @@ def _forecast_finish(prog_p, end_period, data_date):
     if pace <= 0.1:
         return pd.NaT
     return data_date + pd.Timedelta(days=round(30.4 * remaining / pace))
+
+
+def _earned_schedule_finish(prog_p, end_period, data_date, planned_finish):
+    """Earned schedule: the date at which the plan reached today's verified %, compared with today, gives the
+    schedule slip in time; the forecast finish is the planned finish plus that slip. Backtests in the app showed
+    plan-based forecasts beat the recent-pace method by a wide margin."""
+    s = prog_p.dropna(subset=["planned_pct"]).sort_values("period")
+    v = prog_p[(prog_p.period <= end_period) & prog_p.verified_pct.notna()].sort_values("period")
+    if not len(s) or not len(v) or pd.isna(planned_finish):
+        return pd.NaT
+    ev = float(v.verified_pct.iloc[-1])
+    t = s.period.map(lambda q: pd.Period(q, "M").end_time.normalize())
+    pv = s.planned_pct.values
+    if ev >= pv.max() - 1e-9:
+        es = t.iloc[int(np.argmax(pv >= pv.max() - 1e-9))]
+    else:
+        i = int(np.argmax(pv > ev))
+        if i == 0:
+            es = t.iloc[0] - pd.Timedelta(days=30.4 * (pv[0] - ev) / max(pv[0], 1e-6))
+        else:
+            frac = (ev - pv[i - 1]) / max(pv[i] - pv[i - 1], 1e-6)
+            es = t.iloc[i - 1] + (t.iloc[i] - t.iloc[i - 1]) * frac
+    slip = data_date - es
+    return planned_finish + slip
+
+
+def _forecast_finish(prog_p, end_period, data_date, planned_finish=pd.NaT):
+    f = _earned_schedule_finish(prog_p, end_period, data_date, planned_finish)
+    return f if pd.notna(f) else _pace_finish(prog_p, end_period, data_date)
 
 
 # ---------------------------------------------------------------- program table (one row per project)
@@ -257,9 +286,9 @@ def program_table(tables, gates, exceptions, controls, projects, primes, end_per
         est = {}
         for p in df.index:
             dd = df.at[p, "data_date"] if pd.notna(df.at[p, "data_date"]) else pd.Period(end_period, "M").end_time.normalize()
-            est[p] = _forecast_finish(prog[prog.project_id == p], end_period, dd)
+            est[p] = _forecast_finish(prog[prog.project_id == p], end_period, dd, df.at[p, "planned_finish"])
         df["forecast_finish"] = given.reindex(df.index).where(given.reindex(df.index).notna(), pd.Series(est))
-        df["forecast_source"] = np.where(given.reindex(df.index).notna(), "Given", "Estimated from pace")
+        df["forecast_source"] = np.where(given.reindex(df.index).notna(), "Given", "Earned schedule")
         delay = (df.forecast_finish - df.planned_finish).dt.days / 7
         df["delay_weeks"] = delay.clip(lower=0).round(1)
         df["ld_exposure"] = (np.minimum(df.ld_rate * df.delay_weeks, df.ld_cap) / 100 * df.committed).fillna(0).round(0)

@@ -147,16 +147,33 @@ WHERE ABS(b.retainage_withheld - b.ret_base * b.retainage_rate) > p.money_tol;
 -- RULE 9  DUPLICATE_INVOICE: same PO + period + amount as an earlier invoice
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE VIEW r_duplicate AS
-SELECT later.invoice_id, NULL AS line_no, 'DUPLICATE_INVOICE' AS rule, 'HOLD' AS severity,
-       NULL AS variance, later.net_amount AS amount_at_risk,
-       'Matches ' || earlier.invoice_id || ' (' || earlier.invoice_number || ')' AS detail
-FROM invoices later
-JOIN invoices earlier
-  ON earlier.po_id = later.po_id AND earlier.period = later.period
- AND earlier.invoice_id <> later.invoice_id
- AND ABS(earlier.gross_amount - later.gross_amount) <= 1.00
- AND (earlier.invoice_date < later.invoice_date
-      OR (earlier.invoice_date = later.invoice_date AND earlier.invoice_id < later.invoice_id));
+-- Fuzzy duplicate check. Exact invoice-number matching misses resubmissions such as
+-- "INV-5521" vs "5521-R", so a later bill is flagged when, on the same PO and billing month,
+--   (a) the amount is within 2% of an earlier bill, or
+--   (b) the normalized invoice numbers match (case, spaces, dashes and suffixes like R/REV/A ignored);
+-- and, across different POs of the same contractor, when the amount matches to the dollar within 45 days.
+WITH n AS (
+  SELECT i.*, REGEXP_REPLACE(REGEXP_REPLACE(UPPER(i.invoice_number), '[^A-Z0-9]', '', 'g'), '(REV|COPY|R|A)$', '', 'g') AS num_key,
+         CAST(i.invoice_date AS DATE) AS d
+  FROM invoices i
+), pairs AS (
+  SELECT later.invoice_id, later.net_amount, earlier.invoice_id AS earlier_id, earlier.invoice_number AS earlier_no,
+         CASE WHEN later.po_id = earlier.po_id AND later.period = earlier.period AND later.num_key = earlier.num_key THEN 'same invoice number (normalized)'
+              WHEN later.po_id = earlier.po_id AND later.period = earlier.period
+                   AND ABS(earlier.gross_amount - later.gross_amount) <= 0.02 * GREATEST(ABS(earlier.gross_amount), 1) THEN 'same PO and month, amount within 2%'
+              WHEN later.po_id <> earlier.po_id AND later.prime_id = earlier.prime_id
+                   AND ABS(earlier.gross_amount - later.gross_amount) <= 1.00
+                   AND ABS(DATE_DIFF('day', earlier.d, later.d)) <= 45 THEN 'same contractor and amount on another PO'
+         END AS why
+  FROM n later JOIN n earlier
+    ON earlier.invoice_id <> later.invoice_id
+   AND (earlier.d < later.d OR (earlier.d = later.d AND earlier.invoice_id < later.invoice_id))
+)
+SELECT invoice_id, NULL AS line_no, 'DUPLICATE_INVOICE' AS rule, 'HOLD' AS severity,
+       NULL AS variance, MAX(net_amount) AS amount_at_risk,
+       'Possible duplicate of ' || MIN(earlier_id) || ' (' || MIN(earlier_no) || '): ' || MIN(why) AS detail
+FROM pairs WHERE why IS NOT NULL
+GROUP BY invoice_id;
 
 -- ---------------------------------------------------------------------
 -- RULE 10 HEADER_MISMATCH: header totals disagree with lines

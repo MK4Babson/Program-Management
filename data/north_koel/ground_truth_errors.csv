@@ -12,4 +12,4 @@ RA-MAD-05,7.0,QTY_OVER_RECEIPT,4928.1,Earthwork filling billed 6.5% above MB,Fal
 RA-MAD-05,28.0,QTY_OVER_RECEIPT,4256.8,Two more fall repairs billed than recorded complete in MB,False
 RA-MAD-03,6.0,QTY_OVER_RECEIPT,503.07,SUBTLE: excavation billed 1.2% above MB (below the 1.5% default tolerance),True
 RA-NAB-04,,RETAINAGE_ERROR,5068.44,Retention deducted at 2.0% instead of 2.5%,False
-RA-AMB-04R,,DUPLICATE_INVOICE,1181415.59,Same RA bill resubmitted as 'Revised' with identical amount,False
+RA-MAD-01R,,DUPLICATE_INVOICE,208925.86,Same RA bill resubmitted as 'Revised' with identical amount,False

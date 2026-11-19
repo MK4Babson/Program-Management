@@ -32,9 +32,11 @@ from insights import (filter_scope, project_summary, prime_trend, rate_spread,  
 import manager as M  # noqa: E402
 from health import health_table  # noqa: E402
 
-st.set_page_config(page_title="Multi-Prime Commercial Control Tower", page_icon="🛰️", layout="wide")
+st.set_page_config(page_title="Multi-Prime Commercial Control Tower", page_icon="🛰️", layout="wide",
+                   initial_sidebar_state="collapsed")
 from ui import theme  # noqa: E402  (registers the chart theme)
 from ui import pages as P  # noqa: E402
+from ui import analytics_pages as A  # noqa: E402
 from ui.theme import SERIES  # noqa: E402
 
 theme.apply()
@@ -274,7 +276,7 @@ _get = lambda col, p, default=None: (pr_tab[col].get(p, default) if col in pr_ta
 meta = PROGRAM_META.get(source, ("Your program", "Uploaded data", "datacenter"))
 snaps = [snapshot(s) for s in HOME_PROGRAMS]
 ctx = SimpleNamespace(
-    **C, tables=tables, go=go, snapshots=snaps, program_label=meta[0], region=meta[1],
+    **C, tables=tables, gates=gates, exceptions=exceptions, go=go, snapshots=snaps, program_label=meta[0], region=meta[1],
     structure_of=lambda p: _get("structure", p, meta[2]) if isinstance(_get("structure", p), str) else meta[2],
     location_of=lambda p: _get("location", p, meta[1]) if isinstance(_get("location", p), str) else meta[1],
     full_name_of=lambda p: _get("project_name", p, labels.get(p, p)) if isinstance(_get("project_name", p), str) else labels.get(p, p),
@@ -283,6 +285,11 @@ ctx = SimpleNamespace(
 
 
 def analytics():
+    b1, b2, _ = st.columns([1, 1, 6])
+    with b1:
+        st.button("← Insights", key="an_back", on_click=go, args=("insights", None, None), type="tertiary")
+    with b2:
+        st.button("⌂ Mission Control", key="an_home", on_click=go, args=("home", None, None), type="tertiary")
     st.markdown(f'<div class="eyebrow">Program analytics · {meta[0]}</div><div class="hero-title">Commercial control</div>'
                 '<div class="hero-sub">Cost, schedule, cash and billing control: every view, every number, and the evidence behind it.</div>',
                 unsafe_allow_html=True)
@@ -550,7 +557,8 @@ def analytics():
                              "ld_cap": st.column_config.NumberColumn("Cap %", format="%.0f"),
                              "committed": st.column_config.NumberColumn("Contract value", format="$%,.0f"),
                              "ld_exposure": st.column_config.NumberColumn("Penalty exposure", format="$%,.0f")})
-            st.caption("'Estimated from pace' = remaining work / average verified progress per month over the last three months.")
+            st.caption("'Earned schedule' = the planned finish moved by how far behind (or ahead of) the plan the work is today, in time. "
+                       "See Forecast & risk for the backtest behind this choice and the range of likely finish dates.")
 
     # ---------------- Cash flow ----------------
     with tabs[5]:
@@ -730,6 +738,8 @@ PAGES = {
     "home": st.Page(lambda: P.home(ctx), title="Mission Control", icon=":material/public:", url_path="mission", default=True),
     "insights": st.Page(lambda: P.insights(ctx), title="Insights", icon=":material/grid_view:", url_path="insights"),
     "project": st.Page(lambda: P.project(ctx), title="Project", icon=":material/apartment:", url_path="project"),
+    "forecast": st.Page(lambda: A.forecast(ctx), title="Forecast & risk", icon=":material/insights:", url_path="forecast"),
+    "ml": st.Page(lambda: A.ml_lab(ctx), title="ML Lab", icon=":material/model_training:", url_path="ml-lab"),
     "analytics": st.Page(analytics, title="Program analytics", icon=":material/analytics:", url_path="analytics"),
 }
 nav = st.navigation(list(PAGES.values()), position="top")

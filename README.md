@@ -33,19 +33,41 @@ Done by hand, this is slow and inconsistent. This project automates it as rules 
 
 ## Interface
 
-Four pages, in a dark "orbital" theme:
+Six pages, in a dark "orbital" theme:
 
 | Page | What it shows |
 |---|---|
 | **Mission Control** | A 3D Earth (NASA Blue Marble imagery) with a pin at each project's coordinates, colored by health; an automatic camera tour; one card per program with a pixel animation of the structure assembling to its verified % complete |
 | **Insights** | One card per project: health score (0-100) with cost, schedule, billing and cash sub-scores, key numbers and flags |
 | **Project** | Deep dive for one project: live build animation, location close-up, 12 KPIs, progress vs plan with a forecast to completion, cost bridge, bills by gate, money at risk by issue, rates vs program median, live insights and evidence |
+| **Forecast & risk** | Monte Carlo cost and finish ranges (P10-P90), chance within budget and on time, tornado sensitivity, forecast backtest |
+| **ML Lab** | Bill risk model (5 models compared on a hold-out program), ROC and gains charts, confusion matrix, risk drivers, reviewer plan optimized within available hours |
 | **Program analytics** | All manager views (decisions, root causes, contractors, schedule and penalties, cash flow, policy simulator) and the evidence tabs |
 
 The health score formula is in `src/health.py` and is explained on the Insights page.
 Globe library and Earth textures load from a version-pinned public CDN (globe.gl 2.46.2, three-globe 2.45.6).
 Project coordinates are in `projects.csv` (`latitude`, `longitude`, `location`, `structure`).
 The West Texas campuses are fictional, so their locations are illustrative.
+
+## Bill risk model and forecasting (Phase 1)
+
+Two pages add prediction on top of the rules. **The rules engine still decides payment; models decide the order of review and give ranges.**
+
+**ML Lab (bill risk).** Predicts the chance a bill contains an error *before* it is checked, using only information known at that point: contractor and bill history (previous bills' rule results are allowed), bill size and progress jumps, lump-sum and change-order lines, pending change orders, first bills and close-out stage. Training: 12 synthetic programs (1,395 bills); evaluation: a separate hold-out program (117 bills) never used for training or model choice.
+
+| Model | CV AUC (train, 5-fold by program) | Hold-out AUC | Error bills in riskiest 20% |
+|---|---|---|---|
+| Random forest (chosen) | 0.733 | 0.729 | 38% (1.9× random) |
+| Stacked ensemble | 0.733 | 0.731 | 38% |
+| Gradient boosting | 0.711 | 0.739 | 31% |
+| CART (depth 4) | 0.663 | 0.691 | 31% |
+| Logistic regression | 0.663 | 0.673 | 29% |
+
+The model is chosen by cross-validation (simplest within 0.005 AUC of the best), not by the hold-out. A reviewer plan solves a 0-1 knapsack (mixed-integer program, SciPy HiGHS) to cover the most expected overbilling within the reviewer hours available; on the demo's latest month, 12 hours cover 76% of expected overbilling vs about half that share for random picks. Each score shows its top reasons; logistic-regression odds ratios and the CART rules are shown for auditability.
+
+*Honest caveat:* the synthetic world plants errors with documented risk drivers (contractor habits, first bills, rushed months, close-out pressure, pending change orders, repeat errors), so the model learns patterns the simulator contains. It demonstrates the method; real accuracy needs real review history. `python src/build_training.py` rebuilds the training set and model selection.
+
+**Forecast & risk.** Per project, 5,000 Monte Carlo scenarios over pending change-order approval and settlement, unforeseen changes, material price movement and schedule variability give P10-P90 cost and finish, the chance of finishing within budget and on time, and P80 delay-penalty exposure. All assumptions are editable. A tornado chart ranks the inputs by their effect on median cost. A **pseudo-out-of-sample backtest** compared two progress-forecast methods over past months: plan-adjusted forecasts were off by about 1 point one month ahead vs about 5 points for the recent-pace method, so finish forecasts now use **earned schedule** (planned finish moved by today's slip in time). In the data center demo the plan is derived from actual progress, which favors plan-based methods.
 
 ## Manager views (program-manager layer)
 
@@ -106,23 +128,24 @@ An invoice's gate is its **worst** exception. **Amount at risk** is the overbill
 
 ## Results (synthetic)
 
-**Development dataset (seed 42):** 6 buildings × 3 primes, 117 pay applications, $420M billed, 67 planted errors worth $17.5M.
+**Development dataset (seed 42):** 6 buildings × 3 primes, 115 pay applications, $405M billed, 80 planted errors worth $7.9M (1.95% of billing, in line with the 1-3% that construction audits typically recover). Errors are planted with documented risk drivers (see "Bill risk model" below). One realistic duplicate is planted: a resubmission under a "-R" number about 12 days later.
 
 | Metric | Result |
 |---|---|
-| Precision / recall, all rules | 98.5% / 100% |
-| Clean invoices wrongly stopped | 1 of 67 (sent to REVIEW, not HOLD) |
-| Invoices with errors that passed | 0 of 50 |
-
-The one false alarm is a lump-sum line billed 1.1 points above a verified % complete that itself carries measurement noise.
+| Precision / recall, all rules | 100% / 100% |
+| Clean invoices wrongly stopped | 0 of 70 |
+| Invoices with errors that passed | 0 of 45 |
+| Planted overbilling caught | $7.9M of $7.9M |
 
 **Hold-out datasets (tolerances not retuned):**
 
-| Seed | Planted errors | Precision | Recall |
-|---|---|---|---|
-| 7 | 76 | 100% | 100% |
-| 2026 | 55 | 98.2% | 100% |
-| 99 | 72 | 100% | 100% |
+| Seed | Planted errors | Overbilling (% of billing) | Precision | Recall |
+|---|---|---|---|---|
+| 7 | 69 | 1.4% | 98.6% | 100% |
+| 2026 | 67 | 2.3% | 97.1% | 100% |
+| 99 | 50 | 2.0% | 100% | 100% |
+
+**North Koel program (4 contracts rebuilt from real tender documents):** 21 RA bills, $18.2M billed, 14 planted anomalies: 13 caught at default tolerances and 14 at zero quantity tolerance (bills are copied from a jointly signed measurement book), with 0 false alarms. Money at risk: $0.31M (1.7% of billing).
 
 **Stress test on clean data** (40 planted errors, 25% deliberately tiny): 82–93% recall with 0 new false alarms, and every miss was one of the tiny errors below tolerance. With no tiny errors: 100%.
 
@@ -130,13 +153,13 @@ The one false alarm is a lump-sum line billed 1.1 points above a verified % comp
 
 ![Tolerance trade-off](outputs/tolerance_tradeoff.png)
 
-At 0% tolerance the rule flags 163 honest lines (8% precision), because field measurement noise looks like overbilling. From 1.25% to 3.25% both precision and recall are 100%; above that, real overbills start slipping through. **1.5%** sits in the safe band. In a live program this threshold would be set from the actual measurement accuracy of each work type.
+At 0% tolerance the rule flags 158 honest lines (10% precision), because field measurement noise looks like overbilling. From 1.25% to 2.25% both precision and recall are 100%; from 2.5% real overbills start slipping through. **1.5%** sits inside that band. In a live program this threshold would be set from the actual measurement accuracy of each work type (the North Koel bills, copied from a signed measurement book, work at 0%).
 
 ## Honest limitations
 
 - **The rules were written knowing which errors were planted**, so near-perfect scores on synthetic data are expected and are *not* evidence of real-world accuracy. The hold-out runs and the tolerance sweep are the more meaningful results.
 - Real invoices arrive as PDFs in inconsistent formats. Extraction errors will lower accuracy. Week 3 (AI invoice reader) tests this.
-- Real duplicates are often *partial* resubmissions with different totals. This version only catches exact-amount duplicates.
+- Duplicate detection is fuzzy (same PO and month with an amount within 2%, normalized invoice numbers such as 5521 vs 5521-R, or the same contractor and amount on another PO within 45 days) but does not yet compare line-level content across bills.
 - Quantities are checked per period, not cumulatively against contract quantity. A cumulative check is a planned addition.
 - Rates, per diem caps and retainage terms are illustrative, not taken from any real contract.
 

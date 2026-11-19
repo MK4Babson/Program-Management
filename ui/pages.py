@@ -51,6 +51,32 @@ def flags_html(flags, n=3):
                    for l, t in flags[:n])
 
 
+HELP = {
+    "programs": "Construction programs tracked here. A program is a group of related projects.",
+    "sites": "Individual projects (buildings or canal divisions), each pinned at its coordinates.",
+    "committed": "Total value of signed contracts plus approved change orders: what the owner has promised to pay.",
+    "at_risk_sites": "Projects with a health score below 60. Act on these this week.",
+    "program_health": "Average project health (0-100), weighted by contract value, so bigger projects count more. 80+ Healthy, 60-79 Watch, below 60 At risk.",
+    "vs_budget": "Approved budget minus forecast final cost (signed contracts + pending change orders). Positive = room left; negative = forecast overrun.",
+    "verified": "Value of work measured on site as built, divided by contract value. The delta compares it with the schedule plan for the same month.",
+    "blocked": "Money on bills that failed a HOLD check (e.g. duplicate, rate above contract). Payment is stopped until it is fixed or rejected.",
+    "to_check": "Money on bills that failed a REVIEW check. Someone looks before paying, but payment isn't stopped.",
+    "penalty": "Delay penalty (liquidated damages) the owner could claim if the forecast delay happens: weekly rate x weeks late, capped.",
+    "budget": "Owner's approved budget for this contract, including contingency.",
+    "forecast_cost": "Signed contract + approved changes + pending changes (assumes pending changes get approved: the cautious view).",
+    "billed": "Value of work the contractor has billed so far (excluding duplicates).",
+    "spi": "Schedule index = verified % / planned %. 1.00 = on plan; 0.88 = only 88% of the planned work done.",
+    "finish": "Contract completion date vs the forecast: the planned finish moved by today's schedule slip (earned schedule), or given in the data. Ranges in Forecast & risk.",
+    "first_pass": "Share of this project's bills that passed every check the first time. Low = the contractor's billing process needs fixing.",
+    "pending": "Change orders submitted but not yet decided. They are included in the forecast cost.",
+    "recover": "Flagged money that was already paid before the checks ran. Deduct it from the contractor's next bill.",
+}
+
+
+def back(ctx, target, label):
+    st.button(label, key=f"back_{target}_{label}", on_click=ctx.go, args=(target, None, None), type="tertiary")
+
+
 def fmt_date(d):
     return d.strftime("%d %b %Y") if pd.notna(d) else "–"
 
@@ -84,10 +110,10 @@ def home(ctx):
 
     tot_value = sum(p["committed"] for p in snaps)
     c = st.columns(4)
-    c[0].metric("Programs", len(snaps))
-    c[1].metric("Active sites", sum(len(p["projects"]) for p in snaps))
-    c[2].metric("Committed value", money(tot_value))
-    c[3].metric("Sites at risk", sum(int((p["projects"].health_status == "At risk").sum()) for p in snaps))
+    c[0].metric("Programs", len(snaps), help=HELP["programs"])
+    c[1].metric("Active sites", sum(len(p["projects"]) for p in snaps), help=HELP["sites"])
+    c[2].metric("Committed value", money(tot_value), help=HELP["committed"])
+    c[3].metric("Sites at risk", sum(int((p["projects"].health_status == "At risk").sum()) for p in snaps), help=HELP["at_risk_sites"])
 
     st.markdown("### Programs")
     cols = st.columns(len(snaps))
@@ -99,10 +125,10 @@ def home(ctx):
                 f'<div style="display:flex;gap:14px;align-items:center">{ring(prog["health"], 80)}'
                 f'<div><p class="card-title">{prog["label"]}</p><p class="card-sub">{prog["region"]}</p>'
                 f'<span class="pill {PILL[prog["status"]]}">{prog["status"]}</span></div></div>'
-                f'<div class="stat-row"><div class="stat"><div class="v">{len(prog["projects"])}</div><div class="k">Projects</div></div>'
-                f'<div class="stat"><div class="v">{money(prog["committed"])}</div><div class="k">Committed</div></div>'
-                f'<div class="stat"><div class="v">{prog["progress"]*100:.0f}%</div><div class="k">Verified</div></div>'
-                f'<div class="stat"><div class="v">{money(prog["blocked"])}</div><div class="k">Blocked</div></div></div>'
+                f'<div class="stat-row"><div class="stat" title="{HELP["sites"]}"><div class="v">{len(prog["projects"])}</div><div class="k">Projects ⓘ</div></div>'
+                f'<div class="stat" title="{HELP["committed"]}"><div class="v">{money(prog["committed"])}</div><div class="k">Committed ⓘ</div></div>'
+                f'<div class="stat" title="{HELP["verified"]}"><div class="v">{prog["progress"]*100:.0f}%</div><div class="k">Verified ⓘ</div></div>'
+                f'<div class="stat" title="{HELP["blocked"]}"><div class="v">{money(prog["blocked"])}</div><div class="k">Blocked ⓘ</div></div></div>'
                 + flags_html(prog["flags"], 2), unsafe_allow_html=True)
             st.button("Open program insights →", key=f"open_{prog['source']}", width="stretch",
                       on_click=ctx.go, args=("insights", prog["source"], None))
@@ -111,6 +137,7 @@ def home(ctx):
 # ---------------------------------------------------------------- Insights
 def insights(ctx):
     pt, H = ctx.pt, ctx.health
+    back(ctx, "home", "← Mission Control")
     st.markdown(f'<div class="eyebrow">Insights · {ctx.program_label}</div><div class="hero-title">Project health</div>'
                 f'<div class="hero-sub">{ctx.region}. One card per project: health score, what drives it, and what needs '
                 f'attention. Open a project for the full analysis.</div>', unsafe_allow_html=True)
@@ -118,19 +145,32 @@ def insights(ctx):
     w = j.committed.where(j.health.notna(), 0)
     prog_health = (j.health.fillna(0) * w).sum() / w.sum() if w.sum() else np.nan
     k = st.columns(6)
-    k[0].metric("Program health", f"{prog_health:.0f}/100" if pd.notna(prog_health) else "–", "value-weighted", delta_color="off", delta_arrow="off")
-    k[1].metric("Committed", money(j.committed.sum()))
+    k[0].metric("Program health", f"{prog_health:.0f}/100" if pd.notna(prog_health) else "–", "value-weighted", delta_color="off", delta_arrow="off", help=HELP["program_health"])
+    k[1].metric("Committed", money(j.committed.sum()), help=HELP["committed"])
     if ctx.has_ctl:
         vac = j.vac.sum()
         k[2].metric("Vs budget", money(abs(vac)), "under budget" if vac >= 0 else "over budget",
-                    delta_color="normal" if vac >= 0 else "inverse")
+                    delta_color="normal" if vac >= 0 else "inverse", help=HELP["vs_budget"])
     else:
         k[2].metric("Vs budget", "–")
     ver = 100 * j.verified.sum() / j.committed.sum()
     plan = (j.planned_pct * j.committed).sum() / j.committed.sum() if j.planned_pct.notna().any() else np.nan
-    k[3].metric("Verified", f"{ver:.0f}%", f"{ver - plan:+.0f} pts vs plan" if pd.notna(plan) else None)
-    k[4].metric("Blocked (HOLD)", money(j.blocked.fillna(0).sum()))
-    k[5].metric("Penalty risk", money(j.ld_exposure.fillna(0).sum()) if ctx.has_ctl else "–")
+    k[3].metric("Verified", f"{ver:.0f}%", f"{ver - plan:+.0f} pts vs plan" if pd.notna(plan) else None, help=HELP["verified"])
+    k[4].metric("Blocked (HOLD)", money(j.blocked.fillna(0).sum()), help=HELP["blocked"])
+    k[5].metric("Penalty risk", money(j.ld_exposure.fillna(0).sum()) if ctx.has_ctl else "–", help=HELP["penalty"])
+    notes = []
+    if pd.notna(plan) and ver < plan - 0.5:
+        gap_val = (plan - ver) / 100 * j.committed.sum()
+        jj = j.assign(gap=(j.planned_pct - j.verified_pct) / 100 * j.committed).sort_values("gap", ascending=False)
+        worst = [f"{n} ({g_ / 1e6:.1f}M)" for n, g_ in zip(jj.name, jj.gap) if g_ > 0.1 * gap_val][:3]
+        notes.append(f"<b>Behind plan:</b> {plan - ver:.0f} pts ≈ <b>{money(gap_val)}</b> of work not yet built, mostly at {', '.join(worst)}.")
+    if ctx.has_ctl:
+        over = j[j.vac < 0]
+        if len(over):
+            notes.append(f"<b>Over budget:</b> {', '.join(over.name)} ({money(-over.vac.sum())}), even though the program total is "
+                         f"{'under' if vac >= 0 else 'over'} budget.")
+    if notes:
+        st.markdown('<div class="howto">' + "<br>".join(notes) + "</div>", unsafe_allow_html=True)
 
     with st.expander("How the health score works"):
         st.markdown(
@@ -143,6 +183,12 @@ def insights(ctx):
 | **Cash** | {WEIGHTS['cash']:.0%} | 100 minus penalties: {'; '.join(f'{n} × {w:g}' for n, w in CASH_RULES)} |
 
 **80+ Healthy · 60–79 Watch · below 60 At risk.** If a part has no data (e.g., no budget file), the other parts are re-weighted.
+
+**Reading a card:** the ring is the overall score; the four bars show *which kind* of problem it is. Low **Cost** → review
+pending change orders and budget; low **Schedule** → ask for a recovery plan; low **Billing** → meet the contractor's billing
+team and tighten checks; low **Cash** → recover overpaid money, chase advance recovery, clear overdue bills. **Done vs Planned**
+shows how far behind or ahead the work is; **vs budget** is the forecast surplus (+) or overrun (−); the flags list the specific
+items to act on, most serious first.
 """)
     order = j.sort_values("health", na_position="last")
     per_row = 3
@@ -186,6 +232,11 @@ def project(ctx):
     if not ids:
         st.info("No projects in the current selection.")
         return
+    b1, b2, _ = st.columns([1, 1, 6])
+    with b1:
+        back(ctx, "insights", "← Insights")
+    with b2:
+        back(ctx, "home", "⌂ Mission Control")
     cur = st.session_state.get("project") if st.session_state.get("project") in ids else ids[0]
     pick = st.selectbox("Project", ids, index=ids.index(cur), format_func=lambda p: ctx.labels.get(p, p), label_visibility="collapsed")
     st.session_state["project"] = pick
@@ -217,25 +268,25 @@ def project(ctx):
                     + subbars(h.to_dict()) + flags_html(h["alerts"], 6), unsafe_allow_html=True)
     with c2:
         k = st.columns(4)
-        k[0].metric("Budget", money(r.budget) if ctx.has_ctl else "–")
+        k[0].metric("Budget", money(r.budget) if ctx.has_ctl else "–", help=HELP["budget"])
         k[1].metric("Forecast cost", money(r.eac), (f"{money(abs(r.vac))} {'under' if r.vac >= 0 else 'over'}" if ctx.has_ctl else None),
-                    delta_color="normal" if (ctx.has_ctl and r.vac >= 0) else "inverse")
-        k[2].metric("Billed", money(r.billed), f"{r.billed_pct:.0f}% of committed", delta_color="off", delta_arrow="off")
-        k[3].metric("Verified complete", f"{r.verified_pct:.0f}%", f"{r.verified_pct - r.planned_pct:+.0f} pts vs plan" if pd.notna(r.planned_pct) else None)
+                    delta_color="normal" if (ctx.has_ctl and r.vac >= 0) else "inverse", help=HELP["forecast_cost"])
+        k[2].metric("Billed", money(r.billed), f"{r.billed_pct:.0f}% of committed", delta_color="off", delta_arrow="off", help=HELP["billed"])
+        k[3].metric("Verified complete", f"{r.verified_pct:.0f}%", f"{r.verified_pct - r.planned_pct:+.0f} pts vs plan" if pd.notna(r.planned_pct) else None, help=HELP["verified"])
         k = st.columns(4)
-        k[0].metric("Schedule index", f"{r.spi:.2f}" if pd.notna(r.spi) else "–")
+        k[0].metric("Schedule index", f"{r.spi:.2f}" if pd.notna(r.spi) else "–", help=HELP["spi"])
         k[1].metric("Forecast finish", fmt_date(r.forecast_finish) if ctx.has_ctl else "–",
                     f"{r.delay_weeks:.0f} wk late" if ctx.has_ctl and pd.notna(r.delay_weeks) and r.delay_weeks > 0 else None,
-                    delta_color="inverse")
-        k[2].metric("Penalty exposure", money(r.ld_exposure) if ctx.has_ctl else "–")
-        k[3].metric("First-pass rate", f"{r.first_pass_pct:.0f}%" if pd.notna(r.first_pass_pct) else "–")
+                    delta_color="inverse", help=HELP["finish"])
+        k[2].metric("Penalty exposure", money(r.ld_exposure) if ctx.has_ctl else "–", help=HELP["penalty"])
+        k[3].metric("First-pass rate", f"{r.first_pass_pct:.0f}%" if pd.notna(r.first_pass_pct) else "–", help=HELP["first_pass"])
         k = st.columns(4)
-        k[0].metric("Blocked (HOLD)", money(r.blocked if pd.notna(r.blocked) else 0))
-        k[1].metric("To check (REVIEW)", money(r.to_check if pd.notna(r.to_check) else 0))
-        k[2].metric("Pending changes", money(r.pending_co))
+        k[0].metric("Blocked (HOLD)", money(r.blocked if pd.notna(r.blocked) else 0), help=HELP["blocked"])
+        k[1].metric("To check (REVIEW)", money(r.to_check if pd.notna(r.to_check) else 0), help=HELP["to_check"])
+        k[2].metric("Pending changes", money(r.pending_co), help=HELP["pending"])
         cr = ctx.cash.set_index("project_id") if len(ctx.cash) else pd.DataFrame()
         rec = cr.paid_needs_recovery.get(pick, np.nan) if "paid_needs_recovery" in cr else np.nan
-        k[3].metric("To recover", money(rec) if pd.notna(rec) else "–")
+        k[3].metric("To recover", money(rec) if pd.notna(rec) else "–", help=HELP["recover"])
 
     # progress + forecast
     st.markdown("### Progress and forecast")
@@ -256,10 +307,13 @@ def project(ctx):
         tooltip=["s", alt.Tooltip("date:T", format="%b %Y"), alt.Tooltip("pct:Q", format=".1f")])
     layers = [base.mark_line(strokeWidth=2), base.mark_point(size=50, filled=True)]
     marks = []
-    if ctx.has_ctl and pd.notna(r.planned_finish):
-        marks.append({"d": r.planned_finish, "t": "Contract finish", "dy": -132})
-    if ctx.has_ctl and pd.notna(r.forecast_finish):
-        marks.append({"d": r.forecast_finish, "t": "Forecast finish", "dy": -116})
+    if ctx.has_ctl and pd.notna(r.planned_finish) and pd.notna(r.forecast_finish) and abs((r.forecast_finish - r.planned_finish).days) < 30:
+        marks.append({"d": r.planned_finish, "t": "Contract ≈ forecast finish", "dy": -132})
+    else:
+        if ctx.has_ctl and pd.notna(r.planned_finish):
+            marks.append({"d": r.planned_finish, "t": "Contract finish", "dy": -132})
+        if ctx.has_ctl and pd.notna(r.forecast_finish):
+            marks.append({"d": r.forecast_finish, "t": "Forecast finish", "dy": -114})
     if marks:
         mk = pd.DataFrame(marks)
         layers.append(alt.Chart(mk).mark_rule(strokeDash=[2, 3], color="#8792a6").encode(x="d:T"))
@@ -267,28 +321,53 @@ def project(ctx):
             layers.append(alt.Chart(pd.DataFrame([m])).mark_text(align="left", dx=4, dy=m["dy"], color="#b9c3d3", fontSize=11)
                           .encode(x="d:T", text="t"))
     c1, c2 = st.columns([3, 2])
-    c1.altair_chart(alt.layer(*layers).properties(height=320), width="stretch")
-    c1.caption("Dashed purple = forecast from the current pace to completion. Billed above Verified = paid ahead of work.")
+    c1.altair_chart(alt.layer(*layers).properties(height=320, title="Progress: planned vs built vs billed"), width="stretch")
+    gap = (r.verified_pct - r.planned_pct) if pd.notna(r.planned_pct) else np.nan
+    ahead = (r.billed_pct - r.verified_pct) if pd.notna(r.billed_pct) else np.nan
+    c1.markdown(
+        '<div class="howto"><b>How to read:</b> orange dashed = the plan; green = work verified as built; blue = what the '
+        'contractor has billed; purple dashed = forecast to completion (earned schedule; ranges in Forecast & risk). '
+        + (f'<b>Now:</b> {abs(gap):.0f} pts {"behind" if gap < 0 else "ahead of"} plan (≈ {money(abs(gap) / 100 * r.committed)} of work)'
+           if pd.notna(gap) else "")
+        + (f'; billed {"ahead of" if ahead > 0.5 else "in line with"} built work'
+           + (f' by {money(ahead / 100 * r.committed)}' if ahead > 0.5 else "") if pd.notna(ahead) else "")
+        + ".</div>", unsafe_allow_html=True)
 
-    # cost bridge
-    steps = [("Contract", 0, r.original_contract), ("+ Approved", r.original_contract, r.original_contract + r.approved_co),
-             ("+ Pending", r.original_contract + r.approved_co, r.eac), ("Forecast", 0, r.eac)]
-    cb = pd.DataFrame([{"step": s, "y0": a_ / 1e6, "y1": b_ / 1e6, "kind": "total" if s in ("Contract", "Forecast") else "change"}
-                       for s, a_, b_ in steps])
-    cb["label"] = [money(b_ - a_) if k_ == "change" else money(b_) for (s_, a_, b_), k_ in zip(steps, cb.kind)]
-    cb["label"] = [("+" if k_ == "change" else "") + l_ for l_, k_ in zip(cb.label, cb.kind)]
-    ch = alt.Chart(cb).mark_bar(cornerRadius=3, width=38).encode(
-        x=alt.X("step:N", sort=[s for s, *_ in steps], title=None, axis=alt.Axis(labelAngle=0, labelLimit=120, labelOverlap=False)),
-        y=alt.Y("y0:Q", title="$ millions"), y2="y1:Q",
-        color=alt.Color("kind:N", scale=alt.Scale(domain=["total", "change"], range=[SERIES[0], SERIES[1]]), legend=None),
-        tooltip=["step", alt.Tooltip("y1:Q", format=",.3f", title="$M to")])
-    cl = [ch, alt.Chart(cb).mark_text(dy=-8, color="#e8eef8", fontSize=11).encode(
-        x=alt.X("step:N", sort=[s for s, *_ in steps]), y="y1:Q", text="label")]
-    if ctx.has_ctl and pd.notna(r.budget):
-        bl = pd.DataFrame({"b": [r.budget / 1e6], "t": [f"Budget {money(r.budget)}"]})
-        cl += [alt.Chart(bl).mark_rule(color=STATUS["warning"], strokeDash=[4, 3]).encode(y="b:Q"),
-               alt.Chart(bl).mark_text(align="left", x=4, dy=-7, color=STATUS["warning"], fontSize=11).encode(y="b:Q", text="t")]
-    c2.altair_chart(alt.layer(*cl).properties(height=320, title="Cost bridge: contract to forecast"), width="stretch")
+    # budget check: is there room in the budget for the changes?
+    with c2:
+        st.markdown("**Budget check: room in budget vs changes**")
+        if ctx.has_ctl and pd.notna(r.budget):
+            room = r.budget - r.original_contract
+            rows = [{"bar": "Budget room above contract", "part": "Room", "v": room},
+                    {"bar": "Changes to contract", "part": "Approved", "v": r.approved_co},
+                    {"bar": "Changes to contract", "part": "Pending", "v": r.pending_co}]
+            bd = pd.DataFrame(rows)
+            bd["vm"] = bd.v / 1e3
+            dom = ["Room", "Approved", "Pending"]
+            bc = alt.Chart(bd).mark_bar(height=34, stroke="#0e1525", strokeWidth=2).encode(
+                y=alt.Y("bar:N", title=None, sort=["Budget room above contract", "Changes to contract"], axis=alt.Axis(labelLimit=220)),
+                x=alt.X("sum(vm):Q", title="$ thousands", stack="zero"),
+                color=alt.Color("part:N", scale=alt.Scale(domain=dom, range=[SERIES[0], SERIES[1], SERIES[6]]),
+                                legend=alt.Legend(orient="top", title=None)),
+                order=alt.Order("part:N", sort="ascending"),
+                tooltip=["part", alt.Tooltip("v:Q", format="$,.0f", title="Amount")])
+            tot = pd.DataFrame([{"bar": "Budget room above contract", "vm": room / 1e3, "t": money(room)},
+                                {"bar": "Changes to contract", "vm": (r.approved_co + r.pending_co) / 1e3, "t": money(r.approved_co + r.pending_co)}])
+            tl = alt.Chart(tot).mark_text(align="left", dx=6, color="#e8eef8", fontSize=12).encode(
+                y=alt.Y("bar:N", sort=["Budget room above contract", "Changes to contract"]), x="vm:Q", text="t")
+            st.altair_chart((bc + tl).properties(height=170), width="stretch")
+            over = r.eac - r.budget
+            st.markdown(
+                f'<div class="howto"><span class="kv">{money(r.original_contract)}</span> contract + '
+                f'<span class="kv">{money(r.approved_co)}</span> approved + <span class="kv">{money(r.pending_co)}</span> pending = '
+                f'<b class="kv">{money(r.eac)}</b> forecast vs <span class="kv">{money(r.budget)}</span> budget → '
+                + (f'<b style="color:#ff6b6b">{money(over)} over</b>' if over > 0 else f'<b style="color:#3fd13f">{money(-over)} under</b>')
+                + ('. <b>Why:</b> changes exceed the room in the budget'
+                   + (f'; deciding the {money(r.pending_co)} of pending changes decides whether this project stays in budget.' if over > 0 and r.pending_co > 0 else '.')
+                   if over > 0 else '. The changes fit within the budget room.')
+                + '</div>', unsafe_allow_html=True)
+        else:
+            st.caption("Add project_controls.csv (budget) to see this check.")
 
     # bills by month
     g = ctx.gf[ctx.gf.project_id == pick]
@@ -297,23 +376,53 @@ def project(ctx):
         gg = g.groupby(["period", "gate"]).gross_amount.sum().reset_index()
         gg["gate_l"] = gg.gate.map({"PASS": "✓ Pass", "REVIEW": "! Review", "HOLD": "✕ Hold"})
         bm = alt.Chart(gg).mark_bar(stroke="#0e1525", strokeWidth=2, cornerRadiusEnd=3).encode(
-            x=alt.X("period:O", title=None, axis=alt.Axis(labelAngle=0)), y=alt.Y("gross_amount:Q", title="Billed ($)"),
+            x=alt.X("period:O", title=None, axis=alt.Axis(labelAngle=0)), y=alt.Y("gross_amount:Q", title="Billed ($)", axis=alt.Axis(format="$~s")),
             color=alt.Color("gate_l:N", scale=alt.Scale(domain=["✓ Pass", "! Review", "✕ Hold"],
                                                          range=[GATE_COLOR["PASS"], GATE_COLOR["REVIEW"], GATE_COLOR["HOLD"]]),
                             legend=alt.Legend(orient="top", title=None)),
             tooltip=["period", "gate_l", alt.Tooltip("gross_amount:Q", format="$,.0f")]).properties(height=280, title="Bills by month and gate")
         c1.altair_chart(bm, width="stretch")
+        held = 100 * g[g.gate == "HOLD"].gross_amount.sum() / g.gross_amount.sum() if g.gross_amount.sum() else 0
+        c1.markdown(f'<div class="howto"><b>How to read:</b> each bar is a month of billing; green passed every check, yellow needs a '
+                    f'look, red is stopped. <b>Now:</b> {held:.0f}% of billed value is on hold. Mostly-red months point to a contractor '
+                    f'billing process problem, not one-off mistakes.</div>', unsafe_allow_html=True)
     e = ctx.ef[ctx.ef.invoice_id.isin(g.invoice_id)]
-    e = e[e.amount_at_risk > 0]
-    if len(e):
-        ei = e.assign(issue=e.rule.map(lambda x: RULE_LABEL.get(x, x))).groupby("issue").amount_at_risk.sum().reset_index()
-        ib = alt.Chart(ei).mark_bar(cornerRadiusEnd=4, color=SERIES[1], height=16).encode(
-            y=alt.Y("issue:N", sort="-x", title=None, axis=alt.Axis(labelLimit=240)),
-            x=alt.X("amount_at_risk:Q", title="Money at risk ($)"),
-            tooltip=["issue", alt.Tooltip("amount_at_risk:Q", format="$,.0f")]).properties(height=alt.Step(30), title="Where the money at risk comes from")
-        c2.altair_chart(ib, width="stretch")
-    else:
-        c2.success("No money at risk on this project's bills.")
+    e = e[e.amount_at_risk > 0].merge(g[["invoice_id", "prime_id"]], on="invoice_id")
+    with c2:
+        st.markdown("**Where the money at risk comes from**")
+        if len(e):
+            has_dup = (e.rule == "DUPLICATE_INVOICE").any()
+            excl = st.toggle("Exclude one-off duplicates", value=False, key=f"exdup_{pick}", disabled=not has_dup,
+                             help="Duplicates are rare but large. Hide them to see the recurring billing habits.")
+            e2 = e[e.rule != "DUPLICATE_INVOICE"] if excl else e
+            if len(e2):
+                ei = e2.assign(issue=e2.rule.map(lambda x: RULE_LABEL.get(x, x)),
+                               contractor=e2.prime_id.map(lambda p: ctx.names.get(p, p)),
+                               bills=1).groupby(["issue", "contractor"]).agg(v=("amount_at_risk", "sum"), bills=("bills", "sum")).reset_index()
+                totals = ei.groupby("issue").agg(v=("v", "sum"), bills=("bills", "sum")).reset_index()
+                totals["t"] = [f"{money(v)} · {b} line{'s' if b != 1 else ''}" for v, b in zip(totals.v, totals.bills)]
+                order = list(totals.sort_values("v", ascending=False).issue)
+                cdom = sorted(ei.contractor.unique())
+                ib = alt.Chart(ei).mark_bar(height=16, stroke="#0e1525", strokeWidth=1).encode(
+                    y=alt.Y("issue:N", sort=order, title=None, axis=alt.Axis(labelLimit=300)),
+                    x=alt.X("sum(v):Q", title="Money at risk ($)", axis=alt.Axis(format="$~s"), scale=alt.Scale(nice=True)),
+                    color=alt.Color("contractor:N", scale=alt.Scale(domain=cdom, range=SERIES[:len(cdom)]),
+                                    legend=alt.Legend(orient="bottom", title=None, columns=1, labelLimit=320)),
+                    tooltip=["issue", "contractor", alt.Tooltip("v:Q", format="$,.0f"), "bills"])
+                tx = alt.Chart(totals).mark_text(align="left", dx=6, color="#e8eef8", fontSize=11).encode(
+                    y=alt.Y("issue:N", sort=order), x="v:Q", text="t")
+                st.altair_chart((ib + tx).properties(height=alt.Step(30)), width="stretch")
+                top = totals.sort_values("v", ascending=False).iloc[0]
+                share = 100 * top.v / totals.v.sum()
+                lead = ei.groupby("contractor").v.sum().sort_values(ascending=False)
+                st.markdown(f'<div class="howto"><b>How to read:</b> bar length = money on stopped or flagged lines; color = contractor. '
+                            f'<b>Now:</b> "{top.issue}" is {share:.0f}% of it; {lead.index[0]} accounts for {100 * lead.iloc[0] / lead.sum():.0f}%. '
+                            'Big single bars are one-off events (block them with a rule); issues repeated over many lines are habits '
+                            '(fix them with the contractor).</div>', unsafe_allow_html=True)
+            else:
+                st.success("Nothing left once one-off duplicates are excluded.")
+        else:
+            st.success("No money at risk on this project's bills.")
 
     # rates vs program median
     st.markdown("### Rates vs program median")
