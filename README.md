@@ -33,16 +33,29 @@ Done by hand, this is slow and inconsistent. This project automates it as rules 
 
 ## Interface
 
-Six pages, in a dark "orbital" theme:
+Seventeen pages in five menus, in a dark "orbital" theme. A **View as** selector (control panel) shows each role only its pages:
+program manager (all), executive, cost controller, accounts payable, contractor manager, sustainability lead. A badge at the
+top of every page shows any filters in force, with a one-click reset.
 
-| Page | What it shows |
-|---|---|
-| **Mission Control** | A 3D Earth (NASA Blue Marble imagery) with a pin at each project's coordinates, colored by health; an automatic camera tour; one card per program with a pixel animation of the structure assembling to its verified % complete |
-| **Insights** | One card per project: health score (0-100) with cost, schedule, billing and cash sub-scores, key numbers and flags |
-| **Project** | Deep dive for one project: live build animation, location close-up, 12 KPIs, progress vs plan with a forecast to completion, cost bridge, bills by gate, money at risk by issue, rates vs program median, live insights and evidence |
-| **Forecast & risk** | Monte Carlo cost and finish ranges (P10-P90), chance within budget and on time, tornado sensitivity, forecast backtest |
-| **ML Lab** | Bill risk model (5 models compared on a hold-out program), ROC and gains charts, confusion matrix, risk drivers, reviewer plan optimized within available hours |
-| **Program analytics** | All manager views (decisions, root causes, contractors, schedule and penalties, cash flow, policy simulator) and the evidence tabs |
+| Menu | Page | What it answers |
+|---|---|---|
+| Overview | **Mission Control** | Where are the programs and how healthy are they? 3D Earth with a pin per project, camera tour, program cards with a pixel build animation |
+| | **Insights** | One card per project: health score (cost, schedule, billing, cash), key numbers, flags |
+| | **Project** | Deep dive: build animation, 12 KPIs, progress vs plan with forecast, cost bridge, bills by gate, money at risk, rates |
+| | **Trends** | Is the program improving? Every KPI re-computed at each month-end |
+| | **Story mode** | Five chapters for leadership; export to **PDF** or **PowerPoint** |
+| Predict | **Forecast & risk** | Monte Carlo P10-P90 cost and finish, tornado, forecast backtest |
+| | **ML Lab** | Bill risk model, ROC/gains, reviewer plan (knapsack) |
+| Cost & contracts | **Cost intelligence** | Market vs contractor (beta/alpha), hedonic should-cost, cost if bought today, Cost-at-Risk (VaR) + stress tests |
+| | **Change orders** | Approve, negotiate or reject: decision tree, sensitivity, text model, rate and scope checks, memo (template or Gemini) |
+| | **Contractor quality** | p-chart control charts (special vs common cause), k-means segments mapped to review policies |
+| | **Patterns** | Association rules between issues, Granger lead-lag tests, learning curve |
+| Operations | **Cash & process** | Invoice cycle time by stage, Little's Law, bottleneck; SARIMA / Holt-Winters cash forecast with backtest; bottom-up cash calendar |
+| | **Data intake** | Bill Reader (PDF → checked lines), site delivery photos (OCR + GPS check), Google Sheets intake with SHA-256 receipts |
+| | **Sustainability** | Embodied carbon by project and material, low-carbon what-ifs, cost per tonne avoided |
+| | **Mobile** | Phone-sized decision queue: pay verified / hold / ask, alerts, decision log ("Add to Home screen" to install) |
+| Data & stack | **Program analytics** | All manager views and the evidence tabs |
+| | **BigQuery + Looker** | The rules engine translated to BigQuery SQL, load script, reporting views, Looker Studio guide |
 
 The health score formula is in `src/health.py` and is explained on the Insights page.
 Globe library and Earth textures load from a version-pinned public CDN (globe.gl 2.46.2, three-globe 2.45.6).
@@ -68,6 +81,38 @@ The model is chosen by cross-validation (simplest within 0.005 AUC of the best),
 *Honest caveat:* the synthetic world plants errors with documented risk drivers (contractor habits, first bills, rushed months, close-out pressure, pending change orders, repeat errors), so the model learns patterns the simulator contains. It demonstrates the method; real accuracy needs real review history. `python src/build_training.py` rebuilds the training set and model selection.
 
 **Forecast & risk.** Per project, 5,000 Monte Carlo scenarios over pending change-order approval and settlement, unforeseen changes, material price movement and schedule variability give P10-P90 cost and finish, the chance of finishing within budget and on time, and P80 delay-penalty exposure. All assumptions are editable. A tornado chart ranks the inputs by their effect on median cost. A **pseudo-out-of-sample backtest** compared two progress-forecast methods over past months: plan-adjusted forecasts were off by about 1 point one month ahead vs about 5 points for the recent-pace method, so finish forecasts now use **earned schedule** (planned finish moved by today's slip in time). In the data center demo the plan is derived from actual progress, which favors plan-based methods.
+
+## Cost intelligence, patterns, process and intake (full release)
+
+Every method below runs on the demo programs. **Where a reference dataset was needed, it is synthetic and labeled in the app**
+(built by `src/build_extras.py` with documented, known effects), so the method can be checked: the models should recover those effects.
+
+| Feature | Method | Result on the demo | File |
+|---|---|---|---|
+| Market vs contractor | OLS of monthly package cost growth on the trade price index (CAPM-style beta and alpha), alpha by contractor tier | Betas 0.35-0.39, close to the true 0.33-0.42 used to build the history; Tier 3 alpha ~0.17-0.25%/month, Tier 1 not different from 0 | `src/cost_intel.py` |
+| Should-cost | Hedonic log-linear regression on 1,600 past bids: item fixed effects + price index + quantity + region + union + acceleration + site difficulty; spec chosen by BIC; joint F-test on regions; VIF; omitted-variable check; prediction intervals | Full spec wins (BIC −3,571); price elasticity 0.68, scale −0.07, union +13%; all VIF < 1.4 | `src/cost_intel.py` |
+| Cost today | Contract rates escalated with material + labour indices from award to the latest month | Shows which locked-in rates are now cheap or dear | `src/cost_intel.py` |
+| Cost-at-Risk | Analytical (normal), historical (rolling windows) and Monte Carlo (block bootstrap) VaR on unbilled material exposure, expected shortfall, Jarque-Bera check, 5 stress scenarios | 6-month 95% VaR $1.1M-$2.3M on $18.9M exposure (50% pass-through); 2021-style steel surge $4.0M | `src/cost_intel.py` |
+| Change orders | Decision tree (approve / negotiate / reject) with claim risk tied to justification strength, dominance and break-even sensitivity; calibrated Naive Bayes on justification text; rate premium vs base; base-scope-used check | Text model 94% cross-validated accuracy (synthetic text); 19 pending COs, $768K expected saving vs approving all | `src/change_orders.py` |
+| Control charts | p-chart per contractor (3-sigma limits by month size, run and trend rules) | All three contractors in statistical control: no "getting worse" signal to act on | `src/patterns.py` |
+| Segments | k-means on 6 standardized package measures, silhouette for k, PCA map; segments mapped to review policies | 10 light-touch, 5 standard, 3 close-watch packages | `src/patterns.py` |
+| Issue patterns | Association rules (support, confidence, lift) with Fisher exact tests, on this program or the 1,512-bill history | e.g. quantity over-billing and lump-sum over-billing co-occur at 1.9× chance (p = 0.001) in the history | `src/patterns.py` |
+| Lead-lag | Pooled panel Granger F-tests with month fixed effects and a Bonferroni bar | Billing jumps lead errors (p = 0.001); weak "leads" vanish once the project life-cycle is controlled for | `src/patterns.py` |
+| Learning curve | Log-log regression of cost per MW on building number | 92.8% learning rate (true 93%); this program's 6 buildings show none (p = 0.93) | `src/process.py` |
+| Cycle time | Stage durations, Little's Law check, bottleneck by share of waiting time | 22.7 days average; Little's Law 22.3 days; field verification holds 41% of waiting time | `src/process.py` |
+| Cash forecast | SARIMA(1,1,1)(0,1,1)12 vs Holt-Winters vs seasonal naive, rolling-origin backtest (MAE, RMSE, MAPE, bias); bottom-up calendar from the remaining plan | SARIMA best: 3.1% MAPE vs 12.7% for seasonal naive | `src/process.py` |
+| Embodied carbon | Contract quantities × approximate cradle-to-gate factors (ICE-style), spend-based factor for equipment; what-ifs | ~163,000 tCO₂e for the data center program, ~350 t per $1M; rebar and concrete are the hotspots | `src/process.py` |
+| Bill Reader | pdfplumber text + table extraction (Gemini for scans) → the same rules engine | Sample PDFs give identical gates and $ at risk to the structured data on both demo programs | `src/intake.py` |
+| Delivery photos | Tesseract OCR (Gemini optional) of the delivery note + EXIF GPS/time vs the site pin + PO line + billing/payment status | Off-site sample flagged at 52 km from the site | `src/intake.py` |
+| Google Sheets intake | Locked templates with an Apps Script submit-and-freeze menu; app reads the CSV export and issues a SHA-256 receipt | `templates/sheets_intake/Code.gs` | `src/intake.py` |
+| BigQuery + Looker | `sql/engine.sql` translated to BigQuery SQL (sqlglot-validated); transpiled back to DuckDB it gives identical gates and $ at risk | `bigquery/` | `src/bigquery_export.py` |
+
+**Optional AI (Gemini).** Add `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`, default `gemini-2.5-flash`) to the app's secrets on
+Streamlit Cloud. Gemini then drafts change-order memos and reads scanned bills and handwritten delivery notes. Without a key,
+everything still works with templates, pdfplumber and Tesseract. AI drafts and extracts; it never decides payment.
+
+**Real price indices.** On Cost intelligence → "Price indices used", upload FRED CSVs: steel `WPU1017`, copper `WPU10260314`,
+concrete `PCU327320327320`, construction wages `CES2000000003`, electrical equipment `WPU117`.
 
 ## Manager views (program-manager layer)
 
@@ -158,7 +203,10 @@ At 0% tolerance the rule flags 158 honest lines (10% precision), because field m
 ## Honest limitations
 
 - **The rules were written knowing which errors were planted**, so near-perfect scores on synthetic data are expected and are *not* evidence of real-world accuracy. The hold-out runs and the tolerance sweep are the more meaningful results.
-- Real invoices arrive as PDFs in inconsistent formats. Extraction errors will lower accuracy. Week 3 (AI invoice reader) tests this.
+- Real invoices arrive as PDFs in inconsistent formats. The Bill Reader is tested on PDFs this app generates; other layouts need Gemini or a template per contractor.
+- Reference datasets for beta, should-cost, VaR history, learning curve, cash history, change-order text and stage timestamps are synthetic. They prove the methods, not real-world magnitudes.
+- The BigQuery package has been validated by parsing and a DuckDB round trip, not yet run on a live BigQuery project.
+- The mobile view is a responsive web page (installable from the browser), not a native Android app.
 - Duplicate detection is fuzzy (same PO and month with an amount within 2%, normalized invoice numbers such as 5521 vs 5521-R, or the same contractor and amount on another PO within 45 days) but does not yet compare line-level content across bills.
 - Quantities are checked per period, not cumulatively against contract quantity. A cumulative check is a planned addition.
 - Rates, per diem caps and retainage terms are illustrative, not taken from any real contract.
@@ -183,19 +231,16 @@ Full setup, deployment and real-data testing guide: **[DEPLOY_AND_USE.md](DEPLOY
 
 Outputs land in `outputs/`: `exceptions.csv`, `invoice_gates.csv`, `prime_scorecard.csv`, `evaluation_report.md`, `tolerance_sweep.csv`, `tolerance_tradeoff.png`.
 
-## Roadmap
+## Rebuild everything
 
-| Week | Module |
-|---|---|
-| 1 ✅ | 3-way match + pre-approval engine, evaluation, web app, real-data stress test, portfolio filters and decision insights |
-| 2 | **Cost intelligence:** $/sq ft benchmark of Texas data center projects from public filings · **Rate benchmarking** with TxDOT bid tabulations and GSA per diem rates |
-| 2–3 | **Governance dashboard:** BigQuery + Looker Studio (gates by prime, cycle time, $ held, top exception types) |
-| 3 | **AI invoice reader:** an LLM extracts line items from PDF pay applications and drafts exception memos; extraction accuracy measured against ground truth |
-| 4 | Two-page governance gate framework memo + walkthrough video |
+```bash
+python src/generate_data.py && python src/build_controls.py   # demo program
+python src/build_training.py                                   # 13 synthetic programs for the risk model + pattern history
+python src/build_extras.py                                     # market, bid, cash, carbon, CO text, approval logs
+python src/bigquery_export.py                                  # BigQuery + Looker package
+```
 
-## Porting the SQL to BigQuery
-
-The SQL avoids DuckDB-only features. To run it in BigQuery: prefix table names with your dataset (`mpct.invoices`), change `CAST(... AS VARCHAR)` to `CAST(... AS STRING)`, and load `params` as a one-row table.
+Streamlit Cloud installs `requirements.txt` and the Tesseract OCR engine from `packages.txt`.
 
 ---
 *Author: Manish Kumar · Built with AI-assisted development; problem framing, controls design, tolerance choices and interpretation are my own.*

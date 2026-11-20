@@ -37,6 +37,9 @@ st.set_page_config(page_title="Multi-Prime Commercial Control Tower", page_icon=
 from ui import theme  # noqa: E402  (registers the chart theme)
 from ui import pages as P  # noqa: E402
 from ui import analytics_pages as A  # noqa: E402
+from ui import cost_pages as CP  # noqa: E402
+from ui import pattern_pages as PP  # noqa: E402
+from ui import ops_pages as OP  # noqa: E402
 from ui.theme import SERIES  # noqa: E402
 
 theme.apply()
@@ -91,10 +94,20 @@ def load_folder(folder):
     return t, M.read_controls(folder)
 
 
+EXTRA_NAMES = ["co_details", "approval_log"]
+
+
+def load_extras_folder(folder):
+    return {n: pd.read_csv(folder / f"{n}.csv") for n in EXTRA_NAMES if (folder / f"{n}.csv").exists()}
+
+
 def load_uploads(uploaded):
     tables, ctl = {}, {}
     for f in uploaded:
         name = Path(f.name).stem
+        if name in EXTRA_NAMES:
+            st.session_state.setdefault("upload_extras", {})[name] = pd.read_csv(f)
+            continue
         if name in SCHEMA or name == "ground_truth_errors":
             str_cols = {c: str for c, typ, *_ in SCHEMA.get(name, []) if typ == "str"}
             tables[name] = pd.read_csv(f, dtype=str_cols or {"invoice_id": str})
@@ -188,15 +201,35 @@ def snapshot(source):
 # the chosen program lives in a plain session key so it survives page switches
 SOURCES = list(DATASETS) + ["Upload my own CSV files"]
 if st.session_state.get("program") not in SOURCES:
-    st.session_state["program"] = SOURCES[0]
+    import os
+    _d = int(os.environ.get("MPCT_DEFAULT_PROGRAM", "0"))  # testing aid: start on another demo program
+    st.session_state["program"] = SOURCES[_d if 0 <= _d < len(SOURCES) else 0]
 
 
 def _pick_source():
     st.session_state["program"] = st.session_state["source_radio"]
 
 
+ROLES = {
+    "Program manager (everything)": None,
+    "Executive": ["home", "insights", "story", "trends", "mobile"],
+    "Cost controller": ["home", "insights", "project", "cost", "co", "forecast", "process", "trends", "analytics"],
+    "Accounts payable": ["home", "insights", "analytics", "intake", "process", "mobile"],
+    "Contractor manager": ["home", "insights", "contractors", "patterns", "co", "ml", "intake"],
+    "Sustainability lead": ["home", "insights", "carbon", "story"],
+}
+ROLE_FOCUS = {
+    "Executive": "Health, the five-minute story and trends.",
+    "Cost controller": "Budget, forecasts, fair prices, change orders and cash.",
+    "Accounts payable": "Bills on hold, intake, cycle time and the decision queue.",
+    "Contractor manager": "Contractor quality, patterns, change orders and the review queue.",
+    "Sustainability lead": "Embodied carbon and the low-carbon what-ifs.",
+}
 with st.sidebar:
     st.markdown('<div class="eyebrow">Control panel</div>', unsafe_allow_html=True)
+    role = st.selectbox("View as", list(ROLES), key="role", help="Each role sees the pages for its own decisions. Program manager sees everything.")
+    if role in ROLE_FOCUS:
+        st.caption(ROLE_FOCUS[role])
     st.header("1. Data")
     st.radio("Choose data", SOURCES, index=SOURCES.index(st.session_state["program"]), key="source_radio", on_change=_pick_source)
     source = st.session_state["program"]
@@ -209,8 +242,10 @@ with st.sidebar:
 
 if source in DATASETS:
     raw, raw_ctl = load_folder(DATASETS[source])
+    extras = load_extras_folder(DATASETS[source])
 elif uploaded:
     raw, raw_ctl = load_uploads(uploaded)
+    extras = dict(st.session_state.get("upload_extras", {}))
 else:
     st.info("Upload your CSV files in the sidebar. Start from the blank templates; DATA_DICTIONARY.md explains every column.")
     st.stop()
@@ -275,8 +310,30 @@ pr_tab = tables.get("projects", pd.DataFrame(columns=["project_id"])).set_index(
 _get = lambda col, p, default=None: (pr_tab[col].get(p, default) if col in pr_tab.columns else default)  # noqa: E731
 meta = PROGRAM_META.get(source, ("Your program", "Uploaded data", "datacenter"))
 snaps = [snapshot(s) for s in HOME_PROGRAMS]
+
+
+@st.cache_data(show_spinner="Re-running each month-end for the trend view...")
+def monthly(_tables, _controls, _ex, _g, key, projects, primes, periods):
+    rows = []
+    for i, p in enumerate(periods):
+        c = compute(_tables, _controls, _ex, _g, list(projects), list(primes), list(periods[: i + 1]))
+        pt_, h = c["pt"], c["health"]
+        w = pt_.set_index("project_id").committed
+        hl = (h.set_index("project_id").health.reindex(w.index).fillna(0) * w).sum() / w.sum() if w.sum() else np.nan
+        comm = pt_.committed.sum()
+        ver = 100 * pt_.verified.sum() / comm if comm else np.nan
+        plan = (pt_.planned_pct * pt_.committed).sum() / comm if comm and pt_.planned_pct.notna().any() else np.nan
+        rows.append({"period": p, "health": hl, "first_pass": 100 * (c["gf"].gate == "PASS").mean() if len(c["gf"]) else np.nan,
+                     "blocked": c["risk"].blocked.sum(), "to_check": c["risk"].to_check.sum(), "ver_minus_plan": ver - plan if pd.notna(plan) else np.nan,
+                     "vac": pt_.vac.sum() if "vac" in pt_ and pt_.vac.notna().any() else np.nan,
+                     "at_risk_sites": int((h.health_status == "At risk").sum())})
+    return pd.DataFrame(rows)
+
+
 ctx = SimpleNamespace(
     **C, tables=tables, gates=gates, exceptions=exceptions, go=go, snapshots=snaps, program_label=meta[0], region=meta[1],
+    controls=controls, extras=extras, source_key="".join(ch for ch in meta[0] if ch.isalnum())[:30] or "program",
+    monthly=lambda: monthly(tables, controls, exceptions, gates, (data_key, tuple(sorted(tol.items())), cap), tuple(f_projects), tuple(f_primes), tuple(f_periods)),
     structure_of=lambda p: _get("structure", p, meta[2]) if isinstance(_get("structure", p), str) else meta[2],
     location_of=lambda p: _get("location", p, meta[1]) if isinstance(_get("location", p), str) else meta[1],
     full_name_of=lambda p: _get("project_name", p, labels.get(p, p)) if isinstance(_get("project_name", p), str) else labels.get(p, p),
@@ -740,9 +797,52 @@ PAGES = {
     "project": st.Page(lambda: P.project(ctx), title="Project", icon=":material/apartment:", url_path="project"),
     "forecast": st.Page(lambda: A.forecast(ctx), title="Forecast & risk", icon=":material/insights:", url_path="forecast"),
     "ml": st.Page(lambda: A.ml_lab(ctx), title="ML Lab", icon=":material/model_training:", url_path="ml-lab"),
+    "cost": st.Page(lambda: CP.cost_intel(ctx), title="Cost intelligence", icon=":material/price_check:", url_path="cost"),
+    "co": st.Page(lambda: CP.change_orders(ctx), title="Change orders", icon=":material/rule:", url_path="change-orders"),
+    "contractors": st.Page(lambda: PP.contractors(ctx), title="Contractor quality", icon=":material/monitoring:", url_path="contractors"),
+    "patterns": st.Page(lambda: PP.patterns(ctx), title="Patterns", icon=":material/hub:", url_path="patterns"),
+    "process": st.Page(lambda: PP.process(ctx), title="Cash & process", icon=":material/account_balance:", url_path="cash-process"),
+    "carbon": st.Page(lambda: PP.carbon(ctx), title="Sustainability", icon=":material/eco:", url_path="carbon"),
+    "intake": st.Page(lambda: OP.intake(ctx), title="Data intake", icon=":material/document_scanner:", url_path="intake"),
+    "trends": st.Page(lambda: OP.trends(ctx), title="Trends", icon=":material/trending_up:", url_path="trends"),
+    "story": st.Page(lambda: OP.story(ctx), title="Story mode", icon=":material/slideshow:", url_path="story"),
+    "mobile": st.Page(lambda: OP.mobile(ctx), title="Mobile", icon=":material/smartphone:", url_path="mobile"),
+    "google": st.Page(lambda: OP.google_stack(ctx), title="BigQuery + Looker", icon=":material/cloud:", url_path="bigquery"),
     "analytics": st.Page(analytics, title="Program analytics", icon=":material/analytics:", url_path="analytics"),
 }
-nav = st.navigation(list(PAGES.values()), position="top")
+SECTIONS = {
+    "Overview": ["home", "insights", "project", "trends", "story"],
+    "Predict": ["forecast", "ml"],
+    "Cost & contracts": ["cost", "co", "contractors", "patterns"],
+    "Operations": ["process", "intake", "carbon", "mobile"],
+    "Data & stack": ["analytics", "google"],
+}
+allowed = ROLES.get(st.session_state.get("role"), None)
+nav_dict = {sec: [PAGES[k] for k in keys if allowed is None or k in allowed] for sec, keys in SECTIONS.items()}
+nav_dict = {k: v for k, v in nav_dict.items() if v}
+nav = st.navigation(nav_dict, position="top")
+
+
+def _reset_filters():
+    for k_ in (f"fp{sk}", f"fc{sk}", f"fm{sk}"):
+        st.session_state.pop(k_, None)
+
+
+parts = []
+if len(f_projects) < len(all_projects):
+    parts.append(f"{len(f_projects)} of {len(all_projects)} projects")
+if len(f_primes) < len(all_primes):
+    parts.append(f"{len(f_primes)} of {len(all_primes)} contractors")
+if len(f_periods) < len(all_periods):
+    parts.append(f"months {f_periods[0]} to {f_periods[-1]}")
+if any(tol[k_] != TOLERANCES[k_] for k_ in TOLERANCES) or cap != PER_DIEM_CAP:
+    parts.append("custom tolerances")
+if parts:
+    fb1, fb2 = st.columns([8, 1])
+    fb1.markdown(f'<span class="pill warn">Filters applied: {" · ".join(parts)}</span>', unsafe_allow_html=True)
+    fb2.button("Reset", key="reset_filters", on_click=_reset_filters, type="tertiary", help="Back to all projects, contractors and months.")
 if "_goto" in st.session_state:
-    st.switch_page(PAGES[st.session_state.pop("_goto")])
+    target = st.session_state.pop("_goto")
+    if allowed is None or target in allowed:
+        st.switch_page(PAGES[target])
 nav.run()
