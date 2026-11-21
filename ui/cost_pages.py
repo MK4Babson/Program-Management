@@ -330,7 +330,13 @@ def change_orders(ctx):
                                           help="Applies only when the change is on the critical path (schedule impact > 0).")
         a["claim_slope"] = c[3].slider("How much a strong justification raises claim risk", 0.0, 0.8, a["claim_slope"], 0.05)
         st.caption("Chance the contractor claims and wins if we reject = 15% + slope × P(justified).")
-    A = CO.analyze(ctx.tables, det, model, a, should)
+        use_sched = st.toggle("Use the schedule (time impact analysis) for delay days", False, key="co_tia",
+                              help="Off: the delay a contractor claims if rejected. On: that delay inserted into the CPM network; float absorbs part of it.")
+    delay_fn = None
+    if use_sched:
+        from ui.schedule_page import co_delay_fn
+        delay_fn = co_delay_fn(ctx)
+    A = CO.analyze(ctx.tables, det, model, a, should, delay_fn)
     A = A[A.project_id.isin(ctx.pt.project_id)]
     if not len(A):
         st.info("No change orders in this view.")
@@ -371,7 +377,7 @@ def change_orders(ctx):
             st.markdown(f":orange[Contractor-side words:] {r.negative_terms}")
         st.markdown(f"**Rate vs base contract:** {'n/a' if pd.isna(r.rate_premium_pct) else f'{r.rate_premium_pct:+.1f}%'}  \n"
                     f"**Base quantity billed so far:** {'n/a' if pd.isna(r.base_used_pct) else f'{r.base_used_pct:.0f}%'}  \n"
-                    f"**Schedule impact if rejected:** {r.delay_days} days  \n**Concerns:** {r.concerns}")
+                    f"**Schedule impact if rejected:** {r.delay_days} days ({r.delay_basis})  \n**Concerns:** {r.concerns}")
     with c2:
         d = CO.decision(r.amount, r.p_justified, r.delay_days, a)
         st.graphviz_chart(CO.tree_dot(d, r.amount), width="stretch")

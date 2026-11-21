@@ -38,8 +38,11 @@ from ui import theme  # noqa: E402  (registers the chart theme)
 from ui import pages as P  # noqa: E402
 from ui import analytics_pages as A  # noqa: E402
 from ui import cost_pages as CP  # noqa: E402
+from ui import scm_pages as SCM  # noqa: E402
+from ui import macro_pages as GM  # noqa: E402
 from ui import pattern_pages as PP  # noqa: E402
 from ui import ops_pages as OP  # noqa: E402
+from ui import schedule_page as SP  # noqa: E402
 from ui.theme import SERIES  # noqa: E402
 
 theme.apply()
@@ -212,10 +215,11 @@ def _pick_source():
 
 ROLES = {
     "Program manager (everything)": None,
-    "Executive": ["home", "insights", "story", "trends", "mobile"],
-    "Cost controller": ["home", "insights", "project", "cost", "co", "forecast", "process", "trends", "analytics"],
+    "Executive": ["home", "insights", "schedule", "markets", "story", "trends", "mobile"],
+    "Cost controller": ["home", "insights", "project", "cost", "co", "forecast", "schedule", "materials", "markets", "process", "trends", "analytics"],
     "Accounts payable": ["home", "insights", "analytics", "intake", "process", "mobile"],
-    "Contractor manager": ["home", "insights", "contractors", "patterns", "co", "ml", "intake"],
+    "Contractor manager": ["home", "insights", "contractors", "patterns", "co", "schedule", "materials", "ml", "intake"],
+    "Materials & procurement": ["home", "insights", "materials", "markets", "schedule", "cost"],
     "Sustainability lead": ["home", "insights", "carbon", "story"],
 }
 ROLE_FOCUS = {
@@ -224,6 +228,7 @@ ROLE_FOCUS = {
     "Accounts payable": "Bills on hold, intake, cycle time and the decision queue.",
     "Contractor manager": "Contractor quality, patterns, change orders and the review queue.",
     "Sustainability lead": "Embodied carbon and the low-carbon what-ifs.",
+    "Materials & procurement": "Stock everywhere, the material plan, lookahead constraints, suppliers, tariffs and FX.",
 }
 with st.sidebar:
     st.markdown('<div class="eyebrow">Control panel</div>', unsafe_allow_html=True)
@@ -797,6 +802,7 @@ PAGES = {
     "project": st.Page(lambda: P.project(ctx), title="Project", icon=":material/apartment:", url_path="project"),
     "forecast": st.Page(lambda: A.forecast(ctx), title="Forecast & risk", icon=":material/insights:", url_path="forecast"),
     "ml": st.Page(lambda: A.ml_lab(ctx), title="ML Lab", icon=":material/model_training:", url_path="ml-lab"),
+    "schedule": st.Page(lambda: SP.page(ctx), title="Schedule (CPM/PERT)", icon=":material/account_tree:", url_path="schedule"),
     "cost": st.Page(lambda: CP.cost_intel(ctx), title="Cost intelligence", icon=":material/price_check:", url_path="cost"),
     "co": st.Page(lambda: CP.change_orders(ctx), title="Change orders", icon=":material/rule:", url_path="change-orders"),
     "contractors": st.Page(lambda: PP.contractors(ctx), title="Contractor quality", icon=":material/monitoring:", url_path="contractors"),
@@ -809,11 +815,14 @@ PAGES = {
     "mobile": st.Page(lambda: OP.mobile(ctx), title="Mobile", icon=":material/smartphone:", url_path="mobile"),
     "google": st.Page(lambda: OP.google_stack(ctx), title="BigQuery + Looker", icon=":material/cloud:", url_path="bigquery"),
     "analytics": st.Page(analytics, title="Program analytics", icon=":material/analytics:", url_path="analytics"),
+    "materials": st.Page(lambda: SCM.page(ctx), title="Materials & supply chain", icon=":material/inventory_2:", url_path="materials"),
+    "markets": st.Page(lambda: GM.page(ctx), title="Global markets & trade", icon=":material/currency_exchange:", url_path="global-markets"),
 }
 SECTIONS = {
     "Overview": ["home", "insights", "project", "trends", "story"],
-    "Predict": ["forecast", "ml"],
+    "Predict": ["forecast", "schedule", "ml"],
     "Cost & contracts": ["cost", "co", "contractors", "patterns"],
+    "Supply & markets": ["materials", "markets"],
     "Operations": ["process", "intake", "carbon", "mobile"],
     "Data & stack": ["analytics", "google"],
 }

@@ -96,7 +96,8 @@ def tree_dot(d, amount):
 
 
 # ---------------------------------------------------------------- analyst table
-def analyze(tables, details, model, a=None, should=None):
+def analyze(tables, details, model, a=None, should=None, delay_fn=None):
+    """delay_fn(project_id, base_item_code, claimed_days) -> (days, note): optional schedule-based delay (time impact analysis)."""
     co = tables["change_orders"].copy()
     po = tables["purchase_orders"].set_index("po_id")
     pol = tables["po_lines"]
@@ -124,7 +125,10 @@ def analyze(tables, details, model, a=None, should=None):
         if should is not None and len(should) and key[1] is not None:
             m = should[(should.po_id == r.po_id) & (should.item_code == key[1])]
             sc_hi = float(m.pi_hi.iloc[0]) if len(m) else np.nan
-        days = int(getattr(r, "schedule_days_if_rejected", 0) or 0)
+        claimed = int(getattr(r, "schedule_days_if_rejected", 0) or 0)
+        days, delay_note = claimed, "as claimed"
+        if delay_fn is not None and claimed > 0:
+            days, delay_note = delay_fn(r.project_id, key[1], claimed)
         d = decision(float(r.co_amount), p, days, a)
         concerns = []
         if p < 0.4:
@@ -138,7 +142,7 @@ def analyze(tables, details, model, a=None, should=None):
         rows.append({"co_id": r.co_id, "project_id": r.project_id, "prime_id": r.prime_id, "status": r.status,
                      "amount": float(r.co_amount), "justification": r.justification, "cause_category": getattr(r, "cause_category", None),
                      "p_justified": p, "positive_terms": ", ".join(pos), "negative_terms": ", ".join(neg),
-                     "rate_premium_pct": premium, "base_used_pct": used, "should_cost_hi": sc_hi, "delay_days": days,
+                     "rate_premium_pct": premium, "base_used_pct": used, "should_cost_hi": sc_hi, "delay_days": days, "claimed_delay_days": claimed, "delay_basis": delay_note,
                      "ev_approve": d["ev"]["Approve as priced"], "ev_negotiate": d["ev"]["Negotiate"], "ev_reject": d["ev"]["Reject"],
                      "recommendation": d["best"], "expected_saving": d["ev"]["Approve as priced"] - d["ev"][d["best"]],
                      "concerns": "; ".join(concerns) if concerns else "none found"})
