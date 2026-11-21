@@ -33,7 +33,7 @@ Done by hand, this is slow and inconsistent. This project automates it as rules 
 
 ## Interface
 
-Seventeen pages in five menus, in a dark "orbital" theme. A **View as** selector (control panel) shows each role only its pages:
+Eighteen pages in five menus, in a dark "orbital" theme. A **View as** selector (control panel) shows each role only its pages:
 program manager (all), executive, cost controller, accounts payable, contractor manager, sustainability lead. A badge at the
 top of every page shows any filters in force, with a one-click reset.
 
@@ -45,11 +45,14 @@ top of every page shows any filters in force, with a one-click reset.
 | | **Trends** | Is the program improving? Every KPI re-computed at each month-end |
 | | **Story mode** | Five chapters for leadership; export to **PDF** or **PowerPoint** |
 | Predict | **Forecast & risk** | Monte Carlo P10-P90 cost and finish, tornado, forecast backtest |
+| | **Schedule (CPM/PERT)** | Critical path and float per building, PERT chance of finishing on time, Monte Carlo schedule risk (criticality index, merge bias), crashing (time-cost trade-off), time impact analysis of change orders, schedule quality checks |
 | | **ML Lab** | Bill risk model, ROC/gains, reviewer plan (knapsack) |
 | Cost & contracts | **Cost intelligence** | Market vs contractor (beta/alpha), hedonic should-cost, cost if bought today, Cost-at-Risk (VaR) + stress tests |
 | | **Change orders** | Approve, negotiate or reject: decision tree, sensitivity, text model, rate and scope checks, memo (template or Gemini) |
 | | **Contractor quality** | p-chart control charts (special vs common cause), k-means segments mapped to review policies |
 | | **Patterns** | Association rules between issues, Granger lead-lag tests, learning curve |
+| Supply & markets | **Materials & supply chain** | One stock ledger across hub, sub-stores and sites (bags ↔ tonnes); MRP from the CPM forecast; long-lead equipment vs need dates; 6-week lookahead constraints with RACI owners; ABC-XYZ, EOQ, safety stock and reorder point; risk pooling; min-cost transfers (LP with shadow prices); cash tied up and buy-early vs buy-late; supplier OTIF; forecast accuracy (WAPE, bias, MASE); master-data checks |
+| | **Global markets & trade** | Credit, goods and FX markets for the US and each sourcing country; central-bank shock lab (base, cash, M1, M2/M3, multiplier, lending and real rates, forwards, lag); balance of payments identity and reserve tests; West Texas craft-labor tightness → schedule Monte Carlo; tariff table and landed cost; FX exposure and hedging; ten-driver supplier-country risk register; project impact ledger |
 | Operations | **Cash & process** | Invoice cycle time by stage, Little's Law, bottleneck; SARIMA / Holt-Winters cash forecast with backtest; bottom-up cash calendar |
 | | **Data intake** | Bill Reader (PDF → checked lines), site delivery photos (OCR + GPS check), Google Sheets intake with SHA-256 receipts |
 | | **Sustainability** | Embodied carbon by project and material, low-carbon what-ifs, cost per tonne avoided |
@@ -94,6 +97,7 @@ Every method below runs on the demo programs. **Where a reference dataset was ne
 | Cost today | Contract rates escalated with material + labour indices from award to the latest month | Shows which locked-in rates are now cheap or dear | `src/cost_intel.py` |
 | Cost-at-Risk | Analytical (normal), historical (rolling windows) and Monte Carlo (block bootstrap) VaR on unbilled material exposure, expected shortfall, Jarque-Bera check, 5 stress scenarios | 6-month 95% VaR $1.1M-$2.3M on $18.9M exposure (50% pass-through); 2021-style steel surge $4.0M | `src/cost_intel.py` |
 | Change orders | Decision tree (approve / negotiate / reject) with claim risk tied to justification strength, dominance and break-even sensitivity; calibrated Naive Bayes on justification text; rate premium vs base; base-scope-used check | Text model 94% cross-validated accuracy (synthetic text); 19 pending COs, $768K expected saving vs approving all | `src/change_orders.py` |
+| CPM / PERT schedule | Task network per building (28-task data center, 11-task canal template) fitted to contract dates; progress from field-verified quantities; forward/backward pass, total and free float against the contract date; PERT three-point odds; beta-PERT Monte Carlo (3,000 runs) with criticality index and merge bias; greedy crashing incl. parallel critical paths; time impact analysis; DCMA-style checks | Plains C1 forecast 35 days late, 0% chance on time; buying back 27 days costs ~$442K vs ~$1.1M of delay at $40K/day; with TIA on, change-order expected saving rises from $768K to $816K | `src/schedule.py` |
 | Control charts | p-chart per contractor (3-sigma limits by month size, run and trend rules) | All three contractors in statistical control: no "getting worse" signal to act on | `src/patterns.py` |
 | Segments | k-means on 6 standardized package measures, silhouette for k, PCA map; segments mapped to review policies | 10 light-touch, 5 standard, 3 close-watch packages | `src/patterns.py` |
 | Issue patterns | Association rules (support, confidence, lift) with Fisher exact tests, on this program or the 1,512-bill history | e.g. quantity over-billing and lump-sum over-billing co-occur at 1.9× chance (p = 0.001) in the history | `src/patterns.py` |
@@ -131,6 +135,31 @@ The engine checks every bill like a clerk would; the manager views turn those ch
 These use three optional files (`project_controls`, `baseline_plan`, `payments`; see DATA_DICTIONARY.md).
 Two demos include them: the synthetic West Texas data center program and the North Koel canal program
 (4 contracts built from real WAPCOS tender documents, amounts converted at Rs 95 = $1).
+
+## Materials, supply chain and global markets
+
+**Materials & supply chain** (`src/inventory.py`, `src/build_scm.py`, `ui/scm_pages.py`). Every movement is one ledger row; balances everywhere are
+sums of rows, so one bag moving updates every view. Demand comes from the CPM forecast: the remaining material for each building is spread over
+its task's forecast window. Because that demand is known from the schedule, safety stock covers only the unknowns: the forecast error (actual
+issues vs plan) and lead-time variability, SS = z·√(L·σ²error + d²·σ²L). Long-lead equipment is engineer-to-order and is tracked against need
+dates, not reorder points. Transfers are a min-cost transshipment LP (SciPy HiGHS) with a priced "new purchase" source so the gap is always visible.
+The page opens on the **company inventory** (on hand by tier + in transit + on order − allocated to remaining work = free stock, with value
+history and a 26-week forecast), a **project view** per building (site stock, its share of shared stock, need by part of the building, site-level
+safety stock and reorder point on a 3-day sub-store lead time, call-offs, excess to return, equipment vs need dates, all six side by side) and the
+**supply chain**: the factory behind each product, lead time stage by stage (manufacturing, port, ocean, customs, inland) with each stage's share of
+the uncertainty, tier-2 inputs with single-source flags, and every open order's current stage and Monte Carlo ETA (P50/P90) against its need date.
+Planted data errors (bags keyed as tonnes, a duplicate transaction, a transfer before its receipt, a duplicate item, a stale lead time) are caught
+by the checks and left out of planning; the page shows what they would have cost (cement safety stock 6,312 t with them vs 494 t without).
+
+**Global markets & trade** (`src/macro.py`, `src/build_macro.py`, `ui/macro_pages.py`). Follows Marthinsen's three-sector model. The money block uses
+B = CC + RR + ER and mm2 = (1 + c + n)/(c + rd + rn·n + e), with the preferred-asset ratios' response to rates estimated from history. How the
+central bank moves rates changes the method: in corridor / scarce-reserve systems (RBI liquidity operations) the multiplier model applies (example:
++50 bp with a liquidity drain: base −3.0%, multiplier +2.0%, broad money −1.1%, cash −3.6%); in floor systems (Fed, ECB, BoJ) the base need not move,
+so total money follows loan demand and the ratios change only the mix. Forwards use covered interest parity; the BOP tab checks CA + KA + NEO = FA + RRI
+and applies reserve tests (import cover, Greenspan–Guidotti) only where they mean something. The impact ledger turns a shock into dollars inside the
+program window, separating fast channels (forwards, FX, financing) from slow ones (prices, on a 24-month lag).
+
+All materials, macro, labor and BOP data are synthetic. Tariff rows carry their legal basis, dates, source and a "verify" flag.
 
 ## Data model
 
@@ -237,6 +266,8 @@ Outputs land in `outputs/`: `exceptions.csv`, `invoice_gates.csv`, `prime_scorec
 python src/generate_data.py && python src/build_controls.py   # demo program
 python src/build_training.py                                   # 13 synthetic programs for the risk model + pattern history
 python src/build_extras.py                                     # market, bid, cash, carbon, CO text, approval logs
+python src/build_scm.py                                        # materials: items, stores, ledger, deliveries, open orders
+python src/build_macro.py                                      # global markets: money, rates, FX, BOP, labor, tariffs, risk
 python src/bigquery_export.py                                  # BigQuery + Looker package
 ```
 
